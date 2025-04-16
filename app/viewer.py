@@ -1,79 +1,48 @@
+from PyQt5.QtWidgets import QTableWidget, QTableWidgetItem, QVBoxLayout, QPushButton, QWidget
 import pandas as pd
-from PyQt5.QtWidgets import QMainWindow, QPushButton, QFileDialog, QVBoxLayout, QWidget, QTableWidget, QTableWidgetItem, QMessageBox
-from PyQt5.QtCore import Qt
+import os
 
-class ParquetViewer(QMainWindow):
-    def __init__(self):
-        super().__init__()
-
-        # Initialize main window
-        self.df = None
-        self.parquet_file_path = None
-
-        # Create buttons
-        self.load_button = QPushButton("Load Parquet File")
-        self.load_button.clicked.connect(self.load_parquet)
-
-        self.save_button = QPushButton("Save Changes")
-        self.save_button.setEnabled(False)
-        self.save_button.clicked.connect(self.save_over_parquet)
-
-        # Create a QTableWidget to display the DataFrame
-        self.table_widget = QTableWidget()
+class ParquetViewer(QWidget):
+    def __init__(self, parent=None):
+        super(ParquetViewer, self).__init__(parent)
         
-        # Layout to hold buttons and the table
-        layout = QVBoxLayout()
+        # Initialize the UI components
+        self.df = pd.DataFrame()  # Empty DataFrame for demonstration
+        self.init_ui()
+    
+    def init_ui(self):
+        """Set up the UI elements like table, buttons, etc."""
+        self.table_widget = QTableWidget(self)
+        self.table_widget.setRowCount(5)  # Example row count
+        self.table_widget.setColumnCount(3)  # Example column count
+        self.load_button = QPushButton("Load Parquet", self)
+        self.save_button = QPushButton("Save Changes", self)
+        
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.table_widget)
         layout.addWidget(self.load_button)
         layout.addWidget(self.save_button)
-        layout.addWidget(self.table_widget)
+        
+        # Connect buttons to respective functions
+        self.load_button.clicked.connect(self.load_parquet_file)
+        self.save_button.clicked.connect(self.save_parquet_file)
+    
+    def load_parquet_file(self):
+        """Load a Parquet file into the table and DataFrame."""
+        file_path = "path_to_your_parquet_file.parquet"  # Set your file path
+        if os.path.exists(file_path):
+            self.df = pd.read_parquet(file_path)
+            self.update_table_from_dataframe()
+    
+    def update_table_from_dataframe(self):
+        """Update the table widget with data from the DataFrame."""
+        self.table_widget.setRowCount(self.df.shape[0])
+        self.table_widget.setColumnCount(self.df.shape[1])
 
-        # Create a QWidget to hold the layout
-        widget = QWidget()
-        widget.setLayout(layout)
-
-        self.setCentralWidget(widget)
-
-    def load_parquet(self):
-        """Load a Parquet file and display its content in the table."""
-        file_path, _ = QFileDialog.getOpenFileName(self, "Open Parquet File", "", "Parquet Files (*.parquet)")
-        if file_path:
-            self.parquet_file_path = file_path
-            self.df = pd.read_parquet(self.parquet_file_path)
-
-            # Display the DataFrame in the QTableWidget
-            self.display_data_in_table()
-
-            # Enable save button
-            self.save_button.setEnabled(True)
-
-    def display_data_in_table(self):
-        """Populate the QTableWidget with the loaded DataFrame."""
-        if self.df is not None:
-            # Set the row count and column count
-            self.table_widget.setRowCount(len(self.df))
-            self.table_widget.setColumnCount(len(self.df.columns))
-
-            # Set the headers for the columns
-            self.table_widget.setHorizontalHeaderLabels(self.df.columns)
-
-            # Populate the table with the data
-            for row in range(len(self.df)):
-                for col in range(len(self.df.columns)):
-                    self.table_widget.setItem(row, col, QTableWidgetItem(str(self.df.iloc[row, col])))
-
-    def save_over_parquet(self):
-        """Save the changes to the original Parquet file."""
-        if self.df is not None and self.parquet_file_path:
-            # Update the DataFrame with changes made in the table
-            self.update_dataframe_from_table()
-
-            # Save over the original Parquet file
-            self.df.to_parquet(self.parquet_file_path)
-
-            # Show a success message
-            QMessageBox.information(self, "Success", f"Parquet file saved and overwritten at: {self.parquet_file_path}")
-        else:
-            QMessageBox.warning(self, "Error", "No Parquet file loaded.")
+        for row in range(self.df.shape[0]):
+            for col in range(self.df.shape[1]):
+                item = QTableWidgetItem(str(self.df.iloc[row, col]))
+                self.table_widget.setItem(row, col, item)
 
     def update_dataframe_from_table(self):
         """Update the DataFrame with the data from the table."""
@@ -84,10 +53,11 @@ class ParquetViewer(QMainWindow):
                     # Get the text from the table cell
                     new_value = item.text()
 
+                    # Get the column data type using .iloc
+                    column_dtype = self.df.dtypes.iloc[col]
+
                     # Try to cast the value to the appropriate dtype of the DataFrame column
                     try:
-                        column_dtype = self.df.dtypes[col]
-
                         # If it's a numeric column, try to convert to float or int
                         if pd.api.types.is_numeric_dtype(column_dtype):
                             if "." in new_value:
@@ -102,7 +72,9 @@ class ParquetViewer(QMainWindow):
                     except ValueError as e:
                         print(f"Value conversion failed for {new_value} in row {row}, column {col}: {e}")
                         pass  # Skip any conversion errors
-
-    def reset_table(self):
-        """Reset the table after saving to ensure it is up to date."""
-        self.display_data_in_table()
+    
+    def save_parquet_file(self):
+        """Save the modified DataFrame back to a Parquet file."""
+        self.update_dataframe_from_table()  # Ensure the table data is reflected in the DataFrame
+        self.df.to_parquet("path_to_save_file.parquet", engine="pyarrow")  # Save Parquet
+        print("File saved successfully!")
