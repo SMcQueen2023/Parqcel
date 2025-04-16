@@ -1,92 +1,97 @@
-from PyQt5.QtWidgets import QTableWidget, QTableWidgetItem, QVBoxLayout, QPushButton, QWidget, QFileDialog
-import pandas as pd
-import os
+import polars as pl
+from PyQt5.QtWidgets import (
+    QWidget, QVBoxLayout, QPushButton, QFileDialog, QTableView, QMessageBox
+)
+from PyQt5.QtCore import Qt, QAbstractTableModel, QModelIndex
+
+
+class PolarsTableModel(QAbstractTableModel):
+    def __init__(self, df: pl.DataFrame):
+        super().__init__()
+        self._df = df
+
+    def rowCount(self, parent=QModelIndex()):
+        return self._df.height
+
+    def columnCount(self, parent=QModelIndex()):
+        return self._df.width
+
+    def data(self, index, role=Qt.DisplayRole):
+        if role == Qt.DisplayRole:
+            return str(self._df[index.row(), index.column()])
+        elif role == Qt.EditRole:
+            return str(self._df[index.row(), index.column()])
+        return None
+
+    def setData(self, index, value, role=Qt.EditRole):
+        if role == Qt.EditRole:
+            col_name = self._df.columns[index.column()]
+            try:
+                # Cast value to original type
+                dtype = self._df.schema[col_name]
+                cast_value = pl.Series("", [value]).cast(dtype)[0]
+                self._df = self._df.with_columns(
+                    self._df[col_name].set_at_idx(index.row(), cast_value).alias(col_name)
+                )
+                self.dataChanged.emit(index, index, [Qt.DisplayRole])
+                return True
+            except Exception as e:
+                print(f"Failed to update value: {e}")
+        return False
+
+    def headerData(self, section, orientation, role=Qt.DisplayRole):
+        if role == Qt.DisplayRole:
+            if orientation == Qt.Horizontal:
+                return self._df.columns[section]
+            else:
+                return str(section)
+        return None
+
+    def flags(self, index):
+        return Qt.ItemIsSelectable | Qt.ItemIsEnabled | Qt.ItemIsEditable
+
 
 class ParquetViewer(QWidget):
-    def __init__(self, parent=None):
-        super(ParquetViewer, self).__init__(parent)
+    def __init__(self):
+        super().__init__()
+        self.df = None
+        self.model = None
+        self.current_file = None
 
-        # Initialize the UI components
-        self.df = pd.DataFrame()  # Empty DataFrame to start
-        self.init_ui()
+        self.setWindowTitle("Parqcel - Polars Edition")
+        self.resize(800, 600)
 
-    def init_ui(self):
-        """Set up the UI elements like table, buttons, etc."""
-        self.table_widget = QTableWidget(self)
-        self.load_button = QPushButton("Load Parquet", self)
-        self.save_button = QPushButton("Save Changes", self)
+        self.layout = QVBoxLayout()
+        self.setLayout(self.layout)
 
-        layout = QVBoxLayout(self)
-        layout.addWidget(self.table_widget)
-        layout.addWidget(self.load_button)
-        layout.addWidget(self.save_button)
+        self.table_view = QTableView()
+        self.layout.addWidget(self.table_view)
 
-        # Connect buttons to respective functions
-        self.load_button.clicked.connect(self.load_parquet_file)
-        self.save_button.clicked.connect(self.save_parquet_file)
+        self.load_button = QPushButton("Load Parquet")
+        self.load_button.clicked.connect(self.load_parquet)
+        self.layout.addWidget(self.load_button)
 
-        self.setWindowTitle('Parqcel - Parquet File Viewer')
+        self.save_button = QPushButton("Save")
+        self.save_button.clicked.connect(self.save_parquet)
+        self.layout.addWidget(self.save_button)
 
-    def load_parquet_file(self):
-        """Load a Parquet file into the table and DataFrame."""
-        # Open file dialog to select Parquet file
-        file_path, _ = QFileDialog.getOpenFileName(self, 'Open Parquet File', '', 'Parquet Files (*.parquet)')
+    def load_parquet(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Open Parquet File", "", "Parquet Files (*.parquet);;All Files (*)"
+        )
         if file_path:
-            self.df = pd.read_parquet(file_path)
-            self.update_table_from_dataframe(file_path)
+            try:
+                self.df = pl.read_parquet(file_path)
+                self.current_file = file_path
+                self.model = PolarsTableModel(self.df)
+                self.table_view.setModel(self.model)
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to load file:\n{e}")
 
-    def update_table_from_dataframe(self, file_path=None):
-        """Update the table widget with data from the DataFrame."""
-        if self.df.empty:
-            print("No data to load.")
-            return
-
-        # Set row and column count based on DataFrame shape
-        self.table_widget.setRowCount(self.df.shape[0])
-        self.table_widget.setColumnCount(self.df.shape[1])
-
-        # Set table headers to DataFrame column names
-        self.table_widget.setHorizontalHeaderLabels(self.df.columns.tolist())
-
-        # Populate the table with DataFrame data
-        for row in range(self.df.shape[0]):
-            for col in range(self.df.shape[1]):
-                item = QTableWidgetItem(str(self.df.iloc[row, col]))
-                self.table_widget.setItem(row, col, item)
-
-    def update_dataframe_from_table(self):
-        """Update the DataFrame with the data from the table."""
-        for row in range(self.df.shape[0]):
-            for col in range(self.df.shape[1]):
-                item = self.table_widget.item(row, col)
-                if item:
-                    new_value = item.text()
-                    column_dtype = self.df.dtypes.iloc[col]
-
-                    # Try to cast the value to the appropriate dtype of the DataFrame column
-                    try:
-                        if pd.api.types.is_numeric_dtype(column_dtype):
-                            if "." in new_value:
-                                new_value = float(new_value)
-                            else:
-                                new_value = int(new_value)
-                        elif pd.api.types.is_string_dtype(column_dtype):
-                            new_value = str(new_value)
-                        self.df.iloc[row, col] = new_value
-                    except ValueError as e:
-                        print(f"Value conversion failed for {new_value} in row {row}, column {col}: {e}")
-                        pass
-
-    def save_parquet_file(self):
-        """Save the modified DataFrame back to a Parquet file."""
-        if self.df.empty:
-            print("No data to save.")
-            return
-
-        self.update_dataframe_from_table()  # Ensure the table data is reflected in the DataFrame
-
-        # Open file dialog to select the location to save the file
-        save_path, _ = QFileDialog.getSaveFileName(self, 'Save Parquet File', '', 'Parquet Files (*.parquet)')
-        if save_path:
-            self.df.to_parquet(save_path, engine='pyarrow')
-            print(f"File saved successfully to {save_path}")
+    def save_parquet(self):
+        if self.df is not None and self.current_file:
+            try:
+                self.df.write_parquet(self.current_file)
+                QMessageBox.information(self, "Saved", "File saved successfully.")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to save file:\n{e}")
