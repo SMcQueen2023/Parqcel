@@ -93,8 +93,8 @@ class ParquetViewer(QWidget):
     def update_cell(self, row, col, value):
         """ Update the cell in the dataframe """
         if self.df is not None:
-            # Update the Polars DataFrame
-            self.df[row, col] = value
+            # Update the Polars DataFrame directly by setting the value
+            self.df = self.df.with_column(self.df[col].set_at_idx(row, value))
 
             # Debug: Show updated value
             print(f"Updated cell at ({row}, {col}) to {value}")
