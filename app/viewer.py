@@ -1,58 +1,72 @@
 import polars as pl
-from PyQt5.QtWidgets import QTableView, QVBoxLayout, QWidget, QPushButton, QAbstractItemView
-from PyQt5.QtCore import QAbstractTableModel, Qt
-from PyQt5.QtGui import QStandardItem, QStandardItemModel
-from PyQt5.QtWidgets import QFileDialog
+from PyQt5.QtWidgets import QTableView, QVBoxLayout, QWidget, QPushButton, QFileDialog, QMessageBox
+from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QStandardItemModel, QStandardItem
 
 class ParquetViewer(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Parquet File Viewer")
+    def __init__(self):
+        super().__init__()
+        self.df = None  # Initialize an empty DataFrame
+        self.init_ui()
 
-        # Initialize the layout and components
-        layout = QVBoxLayout(self)
+    def init_ui(self):
+        self.setWindowTitle("Parquet Viewer")
+        self.setGeometry(100, 100, 800, 600)
 
-        # QTableView for showing the data
+        layout = QVBoxLayout()
+
+        # TableView
         self.table_view = QTableView(self)
         layout.addWidget(self.table_view)
 
-        # Button to load Parquet file
-        self.load_button = QPushButton("Load Parquet", self)
-        self.load_button.clicked.connect(self.load_parquet)
-        layout.addWidget(self.load_button)
+        # Load Button
+        load_button = QPushButton("Load Parquet File", self)
+        load_button.clicked.connect(self.load_file)
+        layout.addWidget(load_button)
 
-        # Button to save data over the original Parquet file
-        self.save_button = QPushButton("Save Over", self)
-        self.save_button.clicked.connect(self.save_over)
-        layout.addWidget(self.save_button)
+        # Save Button
+        save_button = QPushButton("Save Parquet File", self)
+        save_button.clicked.connect(self.save_over)
+        layout.addWidget(save_button)
 
-        # Initialize the Polars DataFrame variable
-        self.df = None
-        self.model = None
+        self.setLayout(layout)
 
-    def load_parquet(self):
-        # Open file dialog to choose parquet file
+    def load_file(self):
+        # Open file dialog to load a parquet file
         file_path, _ = QFileDialog.getOpenFileName(self, "Open Parquet File", "", "Parquet Files (*.parquet)")
 
-        if not file_path:
-            print("No file selected!")
-            return
+        if file_path:
+            try:
+                # Read the parquet file into a Polars DataFrame
+                self.df = pl.read_parquet(file_path)
 
-        try:
-            # Load the Parquet file using Polars
-            self.df = pl.read_parquet(file_path)
-            print(f"File loaded: {file_path}")
+                # Debug: Show DataFrame content in the console
+                print("Loaded DataFrame:")
+                print(self.df)
 
-            # Convert Polars DataFrame to a format that QTableView can understand
-            self.update_table_view()
-        except Exception as e:
-            print(f"Failed to load Parquet file: {e}")
+                # Set up the model for QTableView
+                self.model = QStandardItemModel()
+                self.model.setHorizontalHeaderLabels(self.df.columns)
+                self.table_view.setModel(self.model)
+
+                # Populate the table view with data from the DataFrame
+                for row in self.df.iter_rows():
+                    row_items = [QStandardItem(str(val)) for val in row]
+                    self.model.appendRow(row_items)
+
+                print(f"Data successfully loaded from: {file_path}")
+
+            except Exception as e:
+                print(f"Failed to load parquet file: {e}")
 
     def save_over(self):
-        # Check if DataFrame is loaded
         if self.df is None:
             print("No data to save!")
             return
+
+        # Debug: Confirm the DataFrame is not empty and has updated data
+        print("DataFrame to save:")
+        print(self.df)
 
         # Open file dialog to save the updated file
         file_path, _ = QFileDialog.getSaveFileName(self, "Save Parquet File", "", "Parquet Files (*.parquet)")
@@ -61,50 +75,35 @@ class ParquetViewer(QWidget):
             print("No file path provided!")
             return
 
+        # Debug: Show the file path to ensure we're saving to the right place
+        print(f"Saving over: {file_path}")
+
         try:
-            # Save the Polars DataFrame back to the same Parquet file
+            # Save the updated DataFrame to the same Parquet file
             self.df.write_parquet(file_path, compression='snappy')
+
+            # Confirm save with a message box
+            QMessageBox.information(self, "File Saved", f"File has been saved over: {file_path}")
             print(f"File saved over: {file_path}")
+
         except Exception as e:
             print(f"Failed to save the file: {e}")
+            QMessageBox.critical(self, "Save Error", f"Failed to save the file: {e}")
+
+    def update_cell(self, row, col, value):
+        """ Update the cell in the dataframe """
+        if self.df is not None:
+            # Update the Polars DataFrame
+            self.df[row, col] = value
+
+            # Debug: Show updated value
+            print(f"Updated cell at ({row}, {col}) to {value}")
+            
+            self.update_table_view()
 
     def update_table_view(self):
-        # Ensure DataFrame is loaded
-        if self.df is None:
-            print("No data to display!")
-            return
-
-        # Convert the Polars DataFrame to a list of lists for the model
-        data = self.df.to_pandas().values.tolist()
-        columns = self.df.columns
-
-        # Create a model from the data
-        self.model = QStandardItemModel(len(data), len(columns))
-
-        # Set the headers for the columns
-        for col_idx, col_name in enumerate(columns):
-            self.model.setHorizontalHeaderItem(col_idx, QStandardItem(col_name))
-
-        # Populate the table with data
-        for row_idx, row_data in enumerate(data):
-            for col_idx, value in enumerate(row_data):
-                self.model.setItem(row_idx, col_idx, QStandardItem(str(value)))
-
-        # Set the model to the table view
-        self.table_view.setModel(self.model)
-        self.table_view.setEditTriggers(QAbstractItemView.DoubleClicked)
-
-    def update_value(self, row, col, value):
-        # Update a value in the DataFrame
-        if self.df is None:
-            print("No data to update!")
-            return
-
-        # Create a new DataFrame with the updated value (Polars is immutable)
-        updated_df = self.df.with_columns(
-            pl.col(self.df.columns[col]).set_at_idx(row, value)
-        )
-
-        # Reassign to self.df and update the table view
-        self.df = updated_df
-        self.update_table_view()
+        """ Update the QTableView to reflect changes """
+        for row in range(self.df.height):
+            for col in range(self.df.width):
+                index = self.model.index(row, col)
+                self.model.setData(index, str(self.df[row, col]))
