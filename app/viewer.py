@@ -4,7 +4,7 @@ import pandas as pd
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QFileDialog, QLabel, QTableWidget, QTableWidgetItem
 import pyarrow.parquet as pq
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import filedialog, messagebox
 
 class ParquetViewer(QWidget):
     def __init__(self):
