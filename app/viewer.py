@@ -64,10 +64,9 @@ class ParquetViewer(QMainWindow):
     def save_over_parquet(self):
         """Save the changes to the original Parquet file."""
         if self.df is not None and self.parquet_file_path:
-            # Example modification: Adding 1 to the "age" column
-            if 'age' in self.df.columns:
-                self.df['age'] = self.df['age'] + 1  # Modify the DataFrame as needed
-            
+            # Update the DataFrame with changes made in the table
+            self.update_dataframe_from_table()
+
             # Save over the original Parquet file
             self.df.to_parquet(self.parquet_file_path)
 
@@ -75,3 +74,22 @@ class ParquetViewer(QMainWindow):
             QMessageBox.information(self, "Success", f"Parquet file saved and overwritten at: {self.parquet_file_path}")
         else:
             QMessageBox.warning(self, "Error", "No Parquet file loaded.")
+
+    def update_dataframe_from_table(self):
+        """Update the DataFrame with the data from the table."""
+        for row in range(self.df.shape[0]):
+            for col in range(self.df.shape[1]):
+                item = self.table_widget.item(row, col)
+                if item:
+                    # Set the updated value from the table back to the DataFrame
+                    try:
+                        self.df.iloc[row, col] = item.text()
+                    except ValueError:
+                        pass  # Skip any non-editable columns
+
+        # Now, save the updated DataFrame back to the Parquet file
+        self.df.to_parquet(self.parquet_file_path)
+
+    def reset_table(self):
+        """Reset the table after saving to ensure it is up to date."""
+        self.display_data_in_table()
