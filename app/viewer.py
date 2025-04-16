@@ -2,6 +2,7 @@ import polars as pl
 from PyQt5.QtWidgets import QTableView, QVBoxLayout, QWidget, QPushButton, QAbstractItemView
 from PyQt5.QtCore import QAbstractTableModel, Qt
 from PyQt5.QtGui import QStandardItem, QStandardItemModel
+from PyQt5.QtWidgets import QFileDialog
 
 class ParquetViewer(QWidget):
     def __init__(self, parent=None):
@@ -10,7 +11,7 @@ class ParquetViewer(QWidget):
 
         # Initialize the layout and components
         layout = QVBoxLayout(self)
-        
+
         # QTableView for showing the data
         self.table_view = QTableView(self)
         layout.addWidget(self.table_view)
@@ -30,12 +31,17 @@ class ParquetViewer(QWidget):
         self.model = None
 
     def load_parquet(self):
-        # Replace this with actual file dialog code, or hardcoded file path
-        file_path = "path/to/your/parquet/file.parquet"
-        
+        # Open file dialog to choose parquet file
+        file_path, _ = QFileDialog.getOpenFileName(self, "Open Parquet File", "", "Parquet Files (*.parquet)")
+
+        if not file_path:
+            print("No file selected!")
+            return
+
         try:
             # Load the Parquet file using Polars
             self.df = pl.read_parquet(file_path)
+            print(f"File loaded: {file_path}")
 
             # Convert Polars DataFrame to a format that QTableView can understand
             self.update_table_view()
@@ -48,9 +54,15 @@ class ParquetViewer(QWidget):
             print("No data to save!")
             return
 
-        # Save the Polars DataFrame back to the same Parquet file
+        # Open file dialog to save the updated file
+        file_path, _ = QFileDialog.getSaveFileName(self, "Save Parquet File", "", "Parquet Files (*.parquet)")
+
+        if not file_path:
+            print("No file path provided!")
+            return
+
         try:
-            file_path = "path/to/your/parquet/file.parquet"
+            # Save the Polars DataFrame back to the same Parquet file
             self.df.write_parquet(file_path)
             print(f"File saved over: {file_path}")
         except Exception as e:
@@ -88,7 +100,7 @@ class ParquetViewer(QWidget):
             print("No data to update!")
             return
 
-        # Update the value in the dataframe (create a new one)
+        # Create a new DataFrame with the updated value (Polars is immutable)
         updated_df = self.df.with_columns(
             pl.col(self.df.columns[col]).set_at_idx(row, value)
         )
