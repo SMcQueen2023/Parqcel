@@ -81,14 +81,27 @@ class ParquetViewer(QMainWindow):
             for col in range(self.df.shape[1]):
                 item = self.table_widget.item(row, col)
                 if item:
-                    # Set the updated value from the table back to the DataFrame
-                    try:
-                        self.df.iloc[row, col] = item.text()
-                    except ValueError:
-                        pass  # Skip any non-editable columns
+                    # Get the text from the table cell
+                    new_value = item.text()
 
-        # Now, save the updated DataFrame back to the Parquet file
-        self.df.to_parquet(self.parquet_file_path)
+                    # Try to cast the value to the appropriate dtype of the DataFrame column
+                    try:
+                        column_dtype = self.df.dtypes[col]
+
+                        # If it's a numeric column, try to convert to float or int
+                        if pd.api.types.is_numeric_dtype(column_dtype):
+                            if "." in new_value:
+                                new_value = float(new_value)  # Convert to float if it has a decimal point
+                            else:
+                                new_value = int(new_value)  # Convert to int if it's an integer
+                        # If the column is of a string type, no conversion is needed
+                        elif pd.api.types.is_string_dtype(column_dtype):
+                            new_value = str(new_value)
+                        # Set the updated value back to the DataFrame
+                        self.df.iloc[row, col] = new_value
+                    except ValueError as e:
+                        print(f"Value conversion failed for {new_value} in row {row}, column {col}: {e}")
+                        pass  # Skip any conversion errors
 
     def reset_table(self):
         """Reset the table after saving to ensure it is up to date."""
