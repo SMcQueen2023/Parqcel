@@ -1,5 +1,5 @@
 import pandas as pd
-from PyQt5.QtWidgets import QMainWindow, QPushButton, QFileDialog, QVBoxLayout, QWidget, QMessageBox
+from PyQt5.QtWidgets import QMainWindow, QPushButton, QFileDialog, QVBoxLayout, QWidget, QTableWidget, QTableWidgetItem, QMessageBox
 from PyQt5.QtCore import Qt
 
 class ParquetViewer(QMainWindow):
@@ -18,10 +18,14 @@ class ParquetViewer(QMainWindow):
         self.save_button.setEnabled(False)
         self.save_button.clicked.connect(self.save_over_parquet)
 
-        # Layout to hold buttons
+        # Create a QTableWidget to display the DataFrame
+        self.table_widget = QTableWidget()
+        
+        # Layout to hold buttons and the table
         layout = QVBoxLayout()
         layout.addWidget(self.load_button)
         layout.addWidget(self.save_button)
+        layout.addWidget(self.table_widget)
 
         # Create a QWidget to hold the layout
         widget = QWidget()
@@ -30,13 +34,32 @@ class ParquetViewer(QMainWindow):
         self.setCentralWidget(widget)
 
     def load_parquet(self):
-        """Load a Parquet file and display its content."""
+        """Load a Parquet file and display its content in the table."""
         file_path, _ = QFileDialog.getOpenFileName(self, "Open Parquet File", "", "Parquet Files (*.parquet)")
         if file_path:
             self.parquet_file_path = file_path
             self.df = pd.read_parquet(self.parquet_file_path)
-            print(self.df)  # Debugging: Print the DataFrame
-            self.save_button.setEnabled(True)  # Enable save button
+
+            # Display the DataFrame in the QTableWidget
+            self.display_data_in_table()
+
+            # Enable save button
+            self.save_button.setEnabled(True)
+
+    def display_data_in_table(self):
+        """Populate the QTableWidget with the loaded DataFrame."""
+        if self.df is not None:
+            # Set the row count and column count
+            self.table_widget.setRowCount(len(self.df))
+            self.table_widget.setColumnCount(len(self.df.columns))
+
+            # Set the headers for the columns
+            self.table_widget.setHorizontalHeaderLabels(self.df.columns)
+
+            # Populate the table with the data
+            for row in range(len(self.df)):
+                for col in range(len(self.df.columns)):
+                    self.table_widget.setItem(row, col, QTableWidgetItem(str(self.df.iloc[row, col])))
 
     def save_over_parquet(self):
         """Save the changes to the original Parquet file."""
