@@ -63,7 +63,7 @@ class ParquetViewer(QWidget):
 
         try:
             # Save the Polars DataFrame back to the same Parquet file
-            self.df.write_parquet(file_path)
+            self.df.write_parquet(file_path, compression='snappy')
             print(f"File saved over: {file_path}")
         except Exception as e:
             print(f"Failed to save the file: {e}")
