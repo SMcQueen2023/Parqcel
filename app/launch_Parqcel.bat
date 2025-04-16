@@ -1,5 +1,18 @@
 @echo off
-cd /d "C:\Users\scott\OneDrive\Documents\GitHub\Parqcel\app"  # Change this to where your script is
-.\venv\Scripts\activate  # Activate the virtual environment
-python main.py  # Run your main script
-pause  # Keeps the terminal open after execution
+echo Activating virtual environment...
+
+cd C:\Users\scott\OneDrive\Documents\GitHub\Parqcel
+
+:: Check if PowerShell exists and activate the virtual environment
+if exist .\.venv\Scripts\Activate.ps1 (
+    powershell -ExecutionPolicy Bypass -File .\.venv\Scripts\Activate.ps1
+) else (
+    echo Virtual environment not found. Exiting...
+    exit /b
+)
+
+echo Running the app...
+python -m app.main
+
+echo Script finished.
+pause
