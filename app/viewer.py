@@ -57,17 +57,19 @@ class ParquetViewer(QWidget):
             # Clear the model
             self.model.clear()
 
-            # Set headers based on the column names in the DataFrame
-            self.model.setHorizontalHeaderLabels(self.df.columns)
+        # Set headers based on the column names in the DataFrame with datatype below the name
+        headers = [f"{col}\n[{str(dtype)}]" for col, dtype in zip(self.df.columns, self.df.dtypes)]
+        self.model.setHorizontalHeaderLabels(headers)
 
-            # Populate the model with data
-            for row in range(len(self.df)):
-                for col in range(len(self.df.columns)):
-                    item = QStandardItem(str(self.df[row, col]))
-                    self.model.setItem(row, col, item)
+        # Populate the model with data
+        for row in range(len(self.df)):
+            for col in range(len(self.df.columns)):
+                item = QStandardItem(str(self.df[row, col]))
+                self.model.setItem(row, col, item)
 
-            # Refresh the table view
-            self.table_view.resizeColumnsToContents()
+        # Refresh the table view
+        self.table_view.resizeColumnsToContents()
+
 
     def on_cell_changed(self, item):
         """Handles when a cell is edited."""
