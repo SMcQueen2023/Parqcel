@@ -31,7 +31,7 @@ Parqcel is a desktop application built with PyQt6 and Polars that allows users t
 
 ## Menu Bar:
 
-- File > Open File: Load a Parquet file.
+- File > Open File: Load a Parquet, CSV, or Excel file.
 
 - File > Save As: Save your changes to a new file.
 
@@ -67,6 +67,7 @@ pip install pyqt6 polars
 
 # 📝 Notes
 - Update the "run_parqcel.bat" file to your local folder path to make launching the app easier.
+- Right-click a column name to sort, drop, and generate column statistics.
 - This app uses polars under the hood, offering significantly faster performance than traditional pandas for large files.
 - Edits are made in-memory and not saved until you explicitly use the Save As function.
 
