@@ -31,11 +31,13 @@ Parqcel is a desktop application built with PyQt6 and Polars that allows users t
 
 ## Menu Bar:
 
-File > Open File: Load a Parquet file.
+- File > Open File: Load a Parquet file.
 
-File > Save As: Save your changes to a new file.
+- File > Save As: Save your changes to a new file.
 
-File > Generate Statistics: Show descriptive statistics of the current column.
+- File > Generate Statistics: Show descriptive statistics of the current column.
+
+# 📦 Installation
 
 **1. Clone this repository:**
 git clone https://github.com/SMcQueen2023/parqcel.git
