@@ -73,4 +73,4 @@ pip install pyqt6 polars
 # 🧑‍💻 Author
 **Scott McQueen**
 
-Data Engineer | Builder of Parqcel
+Data Engineer | Creator of Parqcel
