@@ -66,6 +66,7 @@ git clone https://github.com/SMcQueen2023/parqcel.git
 pip install pyqt6 polars
 
 # 📝 Notes
+- Update the "run_parqcel.bat" file to your local folder path to make launching the app easier.
 - This app uses polars under the hood, offering significantly faster performance than traditional pandas for large files.
 - Edits are made in-memory and not saved until you explicitly use the Save As function.
 
