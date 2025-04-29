@@ -1,4 +1,12 @@
 @echo off
-cd /d "[filepath to maiin.py in the src folder]"
+:: Activate the virtual environment
+call [filepath to virtual environment]]\venv\Scripts\activate.bat
+
+:: Change directory to where your main.py is located
+cd [filepath to main.py in the src folder]]
+
+:: Run the Python script
 python main.py
-pause
+
+:: Deactivate the virtual environment (optional)
+deactivate
