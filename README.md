@@ -40,18 +40,23 @@ Parqcel is a desktop application built with PyQt6 and Polars that allows users t
 # 📦 Installation
 
 **1. Clone this repository:**
+
 git clone https://github.com/SMcQueen2023/parqcel.git
-cd parqcel
+- cd parqcel
 
 **2. Create a virtual environment (optional but recommended)**
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+- python -m venv venv
+- source venv/bin/activate
+- **On Windows:** venv\Scripts\activate
 
 **3. Install dependencies**
-pip install -r requirements.txt
+
+- pip install -r requirements.txt
 
 **4. Run the app**
-python main.py
+
+- python main.py
 
 # 🧩 Dependencies
 - PyQt6
