@@ -59,9 +59,13 @@ Parqcel is a desktop application built with PyQt6 and Polars that allows users t
 - python main.py
 
 # 🧩 Dependencies
-- PyQt6
-- Polars
-- Install them with:
+
+﻿- polars==1.28.1
+- PyQt6==6.9.0
+- PyQt6-Qt6==6.9.0
+- PyQt6_sip==13.10.0
+  
+**Install them with:**
   
 pip install pyqt6 polars
 
