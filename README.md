@@ -37,7 +37,30 @@ File > Save As: Save your changes to a new file.
 
 File > Generate Statistics: Show descriptive statistics of the current column.
 
-📦 Installation
-Clone this repository:
-git clone https://github.com/yourusername/parqcel.git
+1. Clone this repository:
+git clone https://github.com/SMcQueen2023/parqcel.git
 cd parqcel
+
+2. Create a virtual environment (optional but recommended)
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+3. Install dependencies
+pip install -r requirements.txt
+
+4. Run the app
+python main.py
+
+# 🧩 Dependencies
+- PyQt6
+- Polars
+- Install them with:
+pip install pyqt6 polars
+
+# 📝 Notes
+- This app uses polars under the hood, offering significantly faster performance than traditional pandas for large files.
+- Edits are made in-memory and not saved until you explicitly use the Save As function.
+
+# 🧑‍💻 Author
+Scott McQueen
+Data Engineer | Builder of Parqcel
