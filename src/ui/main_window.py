@@ -10,7 +10,7 @@ import os
 # This is a PyQt6 application that uses Polars for data manipulation and display.
 # It provides a table view for displaying data, with pagination and editing capabilities.
 class PolarsTableModel(QAbstractTableModel):
-    def __init__(self, data: pl.DataFrame, chunk_size=500):
+    def __init__(self, data: pl.DataFrame, chunk_size=10000):
         super().__init__()
         self._data = data
         self.chunk_size = chunk_size
