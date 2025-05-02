@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import (
     QMainWindow, QFileDialog, QTableView, QVBoxLayout, QWidget, QMenuBar,
-    QPushButton, QHBoxLayout, QLineEdit, QLabel, QMenu, QMessageBox
+    QPushButton, QHBoxLayout, QLineEdit, QLabel, QMenu, QMessageBox, QInputDialog
 )
 from PyQt6.QtGui import QAction
 from PyQt6.QtCore import QAbstractTableModel, Qt, QPoint
@@ -342,14 +342,47 @@ class MainWindow(QMainWindow):
 
         column = index.column()
         column_name = self.model._data.columns[column]
+        dtype = self.model._data.schema[column_name]
 
         menu = QMenu(self)
 
+        # Add sorting and drop options
         sort_asc = menu.addAction("Sort Ascending")
         sort_desc = menu.addAction("Sort Descending")
         drop_col = menu.addAction("Drop Column")
         stats_col = menu.addAction("Generate Statistics")
 
+        # Initialize filter menu and actions
+        filter_menu = None
+        less_than = None
+        less_than_equal = None
+        equal_to = None
+        greater_than = None
+        greater_than_equal = None
+        contains = None
+        starts_with = None
+        ends_with = None
+        equals = None
+
+        # Add filtering options based on column type
+        if dtype in [pl.Int64, pl.Int32, pl.Float64, pl.Float32, pl.Date]:
+            filter_menu = QMenu("Filter", self)
+            less_than = filter_menu.addAction("Less than")
+            less_than_equal = filter_menu.addAction("Less than or equal to")
+            equal_to = filter_menu.addAction("Equal to")
+            greater_than = filter_menu.addAction("Greater than")
+            greater_than_equal = filter_menu.addAction("Greater than or equal to")
+        elif dtype in [pl.Utf8, pl.Categorical]:
+            filter_menu = QMenu("Filter", self)
+            contains = filter_menu.addAction("Contains")
+            starts_with = filter_menu.addAction("Starts with")
+            ends_with = filter_menu.addAction("Ends with")
+            equals = filter_menu.addAction("Equals")
+
+        if filter_menu:
+            menu.addMenu(filter_menu)
+
+        # Execute the menu and handle the selected action
         action = menu.exec(self.table_view.mapToGlobal(pos))
 
         if action == sort_asc:
@@ -361,6 +394,61 @@ class MainWindow(QMainWindow):
         elif action == stats_col:
             stats = self.model.get_column_statistics(column_name)
             QMessageBox.information(self, f"Statistics for {column_name}", stats)
+        elif action == less_than:
+            self.apply_filter(column_name, "<")
+        elif action == less_than_equal:
+            self.apply_filter(column_name, "<=")
+        elif action == equal_to:
+            self.apply_filter(column_name, "==")
+        elif action == greater_than:
+            self.apply_filter(column_name, ">")
+        elif action == greater_than_equal:
+            self.apply_filter(column_name, ">=")
+        elif action == contains:
+            self.apply_filter(column_name, "contains")
+        elif action == starts_with:
+            self.apply_filter(column_name, "starts_with")
+        elif action == ends_with:
+            self.apply_filter(column_name, "ends_with")
+        elif action == equals:
+            self.apply_filter(column_name, "==")
+
+
+    def apply_filter(self, column_name, filter_type):
+        filter_value, ok = QInputDialog.getText(self, "Enter Filter Value", f"Filter {column_name} with {filter_type}:")
+    
+        if ok and filter_value:
+            # Apply the filter based on the selected filter type
+            try:
+                # Convert the filter_value to float if it is a numeric filter
+                if filter_type in ["<", "<=", "==", ">", ">="]:
+                    filter_value = float(filter_value)  # For numeric columns
+            except ValueError:
+                # Handle invalid numeric input
+                if filter_type in ["<", "<=", "==", ">", ">="]:
+                    QMessageBox.warning(self, "Invalid Value", "Please enter a valid number.")
+                    return
+
+            if filter_type == "contains":
+                self.model._data = self.model._data.filter(pl.col(column_name).str.contains(filter_value))
+            elif filter_type == "starts_with":
+                self.model._data = self.model._data.filter(pl.col(column_name).str.starts_with(filter_value))
+            elif filter_type == "ends_with":
+                self.model._data = self.model._data.filter(pl.col(column_name).str.ends_with(filter_value))
+            elif filter_type == "==":
+                self.model._data = self.model._data.filter(pl.col(column_name) == filter_value)
+            elif filter_type == "<":
+                self.model._data = self.model._data.filter(pl.col(column_name) < filter_value)
+            elif filter_type == "<=":
+                self.model._data = self.model._data.filter(pl.col(column_name) <= filter_value)
+            elif filter_type == ">":
+                self.model._data = self.model._data.filter(pl.col(column_name) > filter_value)
+            elif filter_type == ">=":
+                self.model._data = self.model._data.filter(pl.col(column_name) >= filter_value)
+
+            self.model._current_data = self.model._get_page_data(self.model.get_current_page())
+            self.model.layoutChanged.emit()
+            self.update_page_info()
 
     def generate_statistics(self):
         if not hasattr(self, 'model') or self.model is None:
