@@ -1,10 +1,10 @@
 # Parqcel
-Parqcel is a desktop application built with PyQt6 and Polars that allows users to open, view, edit, and analyze large Parquet files using a spreadsheet-like interface. It features fast pagination, inline cell editing, undo/redo functionality, and descriptive statistics for data columns.
+Parqcel is a desktop application built with PyQt6 and Polars that allows users to open, view, edit, and analyze large Parquet files using a spreadsheet-like interface. It features fast pagination, inline cell editing, undo/redo functionality, and descriptive statistics at the dataset and column levels.
 
 # 🚀 Features
-- Open Parquet Files: Load .parquet files into a fast, editable grid powered by Polars.
+- Open Various File Formats Files: Load .parquet, CSV, and Excel files into a fast, editable grid powered by Polars.
 
-- Efficient Pagination: Navigate large datasets with chunked pagination (default 500 rows per page).
+- Efficient Pagination: Navigate large datasets with chunked pagination (default 10,000 rows per page).
 
 - Inline Editing: Edit cell values directly in the table. Type conversions are handled intelligently.
 
@@ -27,7 +27,7 @@ Parqcel is a desktop application built with PyQt6 and Polars that allows users t
 
 - Statistics Panel: Displays row count, total columns, and column type distribution.
 
-- Context Menu: Right-click a column header to sort (asc/desc) or drop that column.
+- Context Menu: Right-click a column header to sort (asc/desc), drop, filter, or generate statistics on a column.
 
 ## Menu Bar:
 
@@ -35,7 +35,7 @@ Parqcel is a desktop application built with PyQt6 and Polars that allows users t
 
 - File > Save As: Save your changes to a new file.
 
-- File > Generate Statistics: Show descriptive statistics of the current column.
+- File > Generate Statistics: Show descriptive statistics about the entire dataset.
 
 # 📦 Installation
 
