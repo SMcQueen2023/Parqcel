@@ -1,6 +1,7 @@
 from PyQt6.QtWidgets import (
     QMainWindow, QFileDialog, QTableView, QVBoxLayout, QWidget, QMenuBar,
-    QPushButton, QHBoxLayout, QLineEdit, QLabel, QMenu, QMessageBox, QInputDialog
+    QPushButton, QHBoxLayout, QLineEdit, QLabel, QMenu, QMessageBox, QInputDialog,
+    QDialog, QVBoxLayout, QTextEdit
 )
 from PyQt6.QtGui import QAction
 from PyQt6.QtCore import QAbstractTableModel, Qt, QPoint
@@ -35,7 +36,7 @@ class MainWindow(QMainWindow):
         self.undo_button = QPushButton("Undo")
         self.redo_button = QPushButton("Redo")
 
-        # Statistics Layout (Row count, Column count, Column type count)
+        # Footer column statistics layout (Row count, Column count, Column type count)
         self.stats_layout = QVBoxLayout()
         self.row_count_label = QLabel("Rows: 0")
         self.total_column_count_label = QLabel("Total Columns: 0")
@@ -285,12 +286,22 @@ class MainWindow(QMainWindow):
             self.show_statistics_window(stats_text)
 
     def show_statistics_window(self, text):
-        stats_window = QMessageBox(self)
-        stats_window.setWindowTitle("Dataset Statistics")
-        stats_window.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        stats_window.setMinimumSize(600, 400)
-        stats_window.setText(text)
-        stats_window.exec()
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Dataset Statistics")
+        dialog.setMinimumSize(600, 400)
+
+        layout = QVBoxLayout(dialog)
+
+        text_edit = QTextEdit()
+        text_edit.setReadOnly(True)
+        text_edit.setPlainText(text)
+        layout.addWidget(text_edit)
+
+        close_button = QPushButton("Close")
+        close_button.clicked.connect(dialog.accept)
+        layout.addWidget(close_button)
+
+        dialog.exec()
 
     def update_statistics(self):
         if hasattr(self, 'model') and self.model is not None:
