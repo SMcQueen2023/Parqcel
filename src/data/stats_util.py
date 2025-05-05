@@ -14,10 +14,17 @@ def get_numeric_stats(series):
     ]
 
 def get_string_stats(series):
+    non_null_series = series.drop_nulls()
+    str_lengths = non_null_series.cast(str).str.len_chars()
+
     return [
         f"Unique Values: {series.n_unique()}",
         f"Blanks: {(series == '').sum()}",
-        f"Nulls: {series.is_null().sum()}"
+        f"Nulls: {series.is_null().sum()}",
+        f"Min Length: {str_lengths.min()}",
+        f"Max Length: {str_lengths.max()}",
+        f"Median Length: {str_lengths.median()}",
+        f"Average Length: {str_lengths.mean():.2f}"
     ]
 
 def generate_statistics(model):
