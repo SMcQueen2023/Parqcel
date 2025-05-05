@@ -138,6 +138,22 @@ class PolarsTableModel(QAbstractTableModel):
         self._current_data = self._get_page_data(self._current_page)
         self.layoutChanged.emit()
 
+    def add_column(self, column_name: str, default_value=None):
+        if column_name in self._data.columns:
+            return  # Avoid duplicates
+
+        self.save_state()  # Support undo
+
+        # Create new column with default_value repeated for each row
+        new_series = pl.Series(name=column_name, values=[default_value] * self._data.height)
+        self._data = self._data.with_columns(new_series)
+
+        # Update cached info
+        self._current_data = self._get_page_data(self._current_page)
+        self._column_types[column_name] = str(new_series.dtype)
+
+        self.layoutChanged.emit()
+
     def get_column_statistics(self, column_name):
         dtype = self._data.schema[column_name]
         col = self._data[column_name]
@@ -176,3 +192,12 @@ class PolarsTableModel(QAbstractTableModel):
             self._data = self._redo_stack.pop()  # Restore next state
             self._current_data = self._get_page_data(self._current_page)
             self.layoutChanged.emit()
+
+    def update_data(self, new_df: pl.DataFrame):
+        self.save_state()
+        self._data = new_df
+        self._max_pages = (new_df.height + self.chunk_size - 1) // self.chunk_size
+        self._current_page = 0
+        self._current_data = self._get_page_data(self._current_page)
+        self._column_types = self._get_column_types()
+        self.layoutChanged.emit()
