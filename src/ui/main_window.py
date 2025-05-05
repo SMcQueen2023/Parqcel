@@ -9,6 +9,7 @@ import polars as pl
 import os
 from ui.polars_table_model import PolarsTableModel
 from data.stats_util import generate_statistics
+from data.edit_button import add_column
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -88,6 +89,13 @@ class MainWindow(QMainWindow):
         stats_action = QAction("Generate Statistics", self)
         stats_action.triggered.connect(self.generate_statistics)
         file_menu.addAction(stats_action)
+
+        # Edit menu
+        edit_menu = menu_bar.addMenu("Edit")
+
+        add_column_action = QAction("Add Column", self)
+        add_column_action.triggered.connect(self.handle_add_column)
+        edit_menu.addAction(add_column_action)
 
     def open_file(self):
         file_dialog = QFileDialog(self)
@@ -322,3 +330,16 @@ class MainWindow(QMainWindow):
 
             type_count_text = "\n".join([f"{t}: {count}" for t, count in type_count.items()])
             self.column_type_count_label.setText(f"Column Type Count:\n{type_count_text}")
+
+    def handle_add_column(self):
+        if not hasattr(self, 'model') or self.model is None:
+            QMessageBox.warning(self, "No Data", "No file is loaded.")
+            return
+
+        try:
+            df = self.model._data
+            updated_df = add_column(df, self)  # `self` is passed in case the logic needs UI interaction
+            self.model.update_data(updated_df)
+            self.update_statistics()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to add column: {e}")
