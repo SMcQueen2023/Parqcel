@@ -10,6 +10,7 @@ import os
 from ui.polars_table_model import PolarsTableModel
 from data.stats_util import generate_statistics
 from data.edit_button import add_column
+from data.polars_utils import get_column_types, get_page_data, calculate_max_pages, get_column_statistics
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -135,7 +136,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(self, "Error", f"Failed to load file: {e}")
 
     def save_parquet(self):
-        if not hasattr(self, 'model') or self.model is None:
+        if not self.is_model_loaded():
             return
 
         file_name, _ = QFileDialog.getSaveFileName(self, "Save Parquet File", "", "Parquet Files (*.parquet)")
@@ -144,16 +145,28 @@ class MainWindow(QMainWindow):
                 self.model._data.write_parquet(file_name)
             except Exception as e:
                 print(f"Error saving file: {e}")
+    
+    def is_model_loaded(self):
+        if not hasattr(self, 'model') or self.model is None:
+            QMessageBox.warning(self, "No Data", "Please load a file first.")
+            return False
+        return True
 
     def load_next_page(self):
+        if not self.is_model_loaded():
+            return
         self.model.load_next_page()
         self.update_page_info()
 
     def load_previous_page(self):
+        if not self.is_model_loaded():
+            return
         self.model.load_previous_page()
         self.update_page_info()
 
     def jump_to_page(self):
+        if not self.is_model_loaded():
+            return
         page_number = self.page_input.text()
         if page_number.isdigit():
             page_number = int(page_number)
@@ -282,8 +295,7 @@ class MainWindow(QMainWindow):
             self.update_page_info()
 
     def generate_statistics(self):
-        if not hasattr(self, 'model') or self.model is None:
-            QMessageBox.warning(self, "No Data", "No file is loaded.")
+        if not self.is_model_loaded():
             return
         
         # Call the function from stats_util.py
@@ -316,7 +328,8 @@ class MainWindow(QMainWindow):
             df = self.model._data
             row_count = df.height
             total_columns = df.width
-            column_types = self.model._get_column_types()
+            # Correctly call the function from polars_utils.py
+            column_types = get_column_types(df)
 
             self.row_count_label.setText(f"Rows: {row_count}")
             self.total_column_count_label.setText(f"Total Columns: {total_columns}")
