@@ -1,12 +1,10 @@
 from PyQt6.QtCore import QAbstractTableModel, Qt
 import polars as pl
-from data.polars_utils import (
-    get_column_types,
-    get_page_data,
-    calculate_max_pages,
-    get_column_statistics,
-)
-from data.polars_utils import (
+from logic.stats import (
+    get_numeric_stats,
+    get_string_stats,
+    generate_statistics,
+    update_statistics,
     get_column_types,
     get_page_data,
     calculate_max_pages,

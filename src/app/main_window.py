@@ -1,16 +1,25 @@
 from PyQt6.QtWidgets import (
     QMainWindow, QFileDialog, QTableView, QVBoxLayout, QWidget, QMenuBar,
     QPushButton, QHBoxLayout, QLineEdit, QLabel, QMenu, QMessageBox, QInputDialog,
-    QDialog, QVBoxLayout, QTextEdit
+    QDialog, QTextEdit
 )
 from PyQt6.QtGui import QAction
 from PyQt6.QtCore import QAbstractTableModel, Qt, QPoint
 import polars as pl
 import os
-from ui.polars_table_model import PolarsTableModel
-from data.stats_util import generate_statistics
-from data.edit_button import add_column
-from data.polars_utils import get_column_types, get_page_data, calculate_max_pages, get_column_statistics
+from logic.filters import apply_filter  # Import logic to apply filters to dataframe
+from models.polars_table_model import PolarsTableModel  # Import the model class
+from app.edit_dialogs import add_column  # Import add_column function
+from logic.stats import (
+    get_numeric_stats,
+    get_string_stats,
+    generate_statistics,
+    update_statistics,
+    get_column_types,
+    get_page_data,
+    calculate_max_pages,
+    get_column_statistics,
+)
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -257,48 +266,18 @@ class MainWindow(QMainWindow):
         elif action == equals:
             self.apply_filter(column_name, "==")
 
-
     def apply_filter(self, column_name, filter_type):
-        filter_value, ok = QInputDialog.getText(self, "Enter Filter Value", f"Filter {column_name} with {filter_type}:")
-    
-        if ok and filter_value:
-            # Apply the filter based on the selected filter type
-            try:
-                # Convert the filter_value to float if it is a numeric filter
-                if filter_type in ["<", "<=", "==", ">", ">="]:
-                    filter_value = float(filter_value)  # For numeric columns
-            except ValueError:
-                # Handle invalid numeric input
-                if filter_type in ["<", "<=", "==", ">", ">="]:
-                    QMessageBox.warning(self, "Invalid Value", "Please enter a valid number.")
-                    return
+        if not self.is_model_loaded():
+            return
 
-            if filter_type == "contains":
-                self.model._data = self.model._data.filter(pl.col(column_name).str.contains(filter_value))
-            elif filter_type == "starts_with":
-                self.model._data = self.model._data.filter(pl.col(column_name).str.starts_with(filter_value))
-            elif filter_type == "ends_with":
-                self.model._data = self.model._data.filter(pl.col(column_name).str.ends_with(filter_value))
-            elif filter_type == "==":
-                self.model._data = self.model._data.filter(pl.col(column_name) == filter_value)
-            elif filter_type == "<":
-                self.model._data = self.model._data.filter(pl.col(column_name) < filter_value)
-            elif filter_type == "<=":
-                self.model._data = self.model._data.filter(pl.col(column_name) <= filter_value)
-            elif filter_type == ">":
-                self.model._data = self.model._data.filter(pl.col(column_name) > filter_value)
-            elif filter_type == ">=":
-                self.model._data = self.model._data.filter(pl.col(column_name) >= filter_value)
-
-            self.model._current_data = self.model._get_page_data(self.model.get_current_page())
-            self.model.layoutChanged.emit()
-            self.update_page_info()
+        apply_filter(self, self.model, column_name, filter_type)
+        self.update_page_info()
 
     def generate_statistics(self):
         if not self.is_model_loaded():
             return
         
-        # Call the function from stats_util.py
+        # Call the function from stats.py
         stats_text = generate_statistics(self.model)
 
         if stats_text:
@@ -324,25 +303,20 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def update_statistics(self):
-        if hasattr(self, 'model') and self.model is not None:
-            df = self.model._data
-            row_count = df.height
-            total_columns = df.width
-            # Correctly call the function from polars_utils.py
-            column_types = get_column_types(df)
+        if not self.is_model_loaded():
+            return None  # Or return an empty dict if your UI expects it
 
-            self.row_count_label.setText(f"Rows: {row_count}")
-            self.total_column_count_label.setText(f"Total Columns: {total_columns}")
+        df = self.model._data
+        row_count = df.height
+        total_columns = df.width
+        column_types = get_column_types(df)
 
-            # Count columns by type
-            type_count = {}
-            for col_name, col_type in column_types.items():
-                if col_type not in type_count:
-                    type_count[col_type] = 0
-                type_count[col_type] += 1
+        return {
+            "row_count": row_count,
+            "total_columns": total_columns,
+            "column_types": column_types
+        }
 
-            type_count_text = "\n".join([f"{t}: {count}" for t, count in type_count.items()])
-            self.column_type_count_label.setText(f"Column Type Count:\n{type_count_text}")
 
     def handle_add_column(self):
         if not hasattr(self, 'model') or self.model is None:

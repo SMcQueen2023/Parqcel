@@ -1,19 +1,16 @@
-import sys
-import os
-from PyQt6.QtWidgets import QApplication, QMainWindow
-from ui.main_window import MainWindow  # Import MainWindow from main_window.py
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel, QLineEdit, QPushButton, QMessageBox
-from main import MainWindow
+from PyQt6.QtWidgets import QApplication
+from app.main_window import MainWindow  # Correct import path
+from models.polars_table_model import PolarsTableModel  # Correct import path
 
 def main():
-    app = QApplication(sys.argv)
+    app = QApplication([])
 
     # Create and show the main window
     window = MainWindow()
     window.show()
 
     # Start the Qt event loop
-    sys.exit(app.exec())
+    app.exec()
 
 if __name__ == "__main__":
     main()
