@@ -70,6 +70,7 @@ class AddColumnDialog(QDialog):
         name = self.name_input.text().strip()
         dtype = self.type_combo.currentText()
 
+        # Convert the data to appropriate types here to reduce duplication in other parts
         if dtype == "String":
             value = self.string_input.text()
         elif dtype == "Integer":
@@ -77,8 +78,7 @@ class AddColumnDialog(QDialog):
         elif dtype == "Float":
             value = self.float_input.value()
         elif dtype == "Date":
-            qdate = self.date_input.date()
-            value = qdate.toString("yyyy-MM-dd")
+            value = self.date_input.date().toString("yyyy-MM-dd")
         else:
             value = None
 
@@ -92,21 +92,23 @@ def add_column(df: pl.DataFrame, parent=None) -> pl.DataFrame:
 
     col_name, dtype, default_value = dialog.get_data()
 
-    # If the column name is invalid, return without modifying the DataFrame
+    # Validate the column name here before proceeding
     if not col_name or any(c in col_name for c in r'<>:"/\|?*') or col_name.strip() == "":
         QMessageBox.warning(parent, "Invalid Column Name", "Please enter a valid column name.")
-        return df  # Reject invalid column names
+        return df
 
+    # Try-catch not necessary if proper validation is handled before data conversion
     try:
         if dtype == "Integer":
             default_value = int(default_value)
         elif dtype == "Float":
             default_value = float(default_value)
         elif dtype == "Date":
-            default_value = str(default_value)
+            default_value = str(default_value)  # Ensure consistent string format
         else:
-            default_value = str(default_value)
+            default_value = str(default_value)  # For strings
     except ValueError:
+        QMessageBox.warning(parent, "Invalid Data Type", "Invalid default value for the specified data type.")
         return df
 
     new_col = pl.Series(name=col_name, values=[default_value] * df.height)
