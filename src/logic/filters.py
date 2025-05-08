@@ -1,108 +1,50 @@
-from PyQt6.QtCore import QRegularExpression
-from PyQt6.QtGui import QRegularExpressionValidator
-from PyQt6.QtWidgets import QInputDialog, QLineEdit
+import polars as pl
+from PyQt6.QtWidgets import (
+    QInputDialog, QMessageBox
+)
+from logic.stats import get_page_data
 
-# Map from filter operation to lambda for string
-STRING_OPERATIONS = {
-    "contains": lambda value, filter_value: filter_value.lower() in value.lower(),
-    "starts with": lambda value, filter_value: value.lower().startswith(filter_value.lower()),
-    "ends with": lambda value, filter_value: value.lower().endswith(filter_value.lower()),
-    "equals": lambda value, filter_value: value.lower() == filter_value.lower(),
-}
+def apply_filter(self, column_name, filter_type):
+    # Ask for the filter value
+    filter_value, ok = QInputDialog.getText(self, "Enter Filter Value", f"Filter {column_name} with {filter_type}:")
+    
+    if ok and filter_value:
+        self.model.save_state()  # Save current state before applying filter (for undo functionality)
 
-# Map from filter operation to lambda for numeric/date
-NUMERIC_DATE_OPERATIONS = {
-    "<": lambda a, b: a < b,
-    "<=": lambda a, b: a <= b,
-    "==": lambda a, b: a == b,
-    ">=": lambda a, b: a >= b,
-    ">": lambda a, b: a > b,
-}
-
-
-class BaseFilter:
-    def __init__(self, column_name, operation, filter_value):
-        self.column_name = column_name
-        self.operation = operation
-        self.filter_value = filter_value
-
-    def matches(self, value):
-        raise NotImplementedError("Subclasses must implement this method")
-
-
-class StringFilter(BaseFilter):
-    def matches(self, value):
-        if value is None:
-            return False
-        return STRING_OPERATIONS[self.operation](str(value), self.filter_value)
-
-
-class NumericDateFilter(BaseFilter):
-    def __init__(self, column_name, operation, filter_value, cast_func=float):
-        super().__init__(column_name, operation, filter_value)
-        self.cast_func = cast_func
-
-    def matches(self, value):
+        # Convert the filter_value to float if it is a numeric filter
         try:
-            return NUMERIC_DATE_OPERATIONS[self.operation](self.cast_func(value), self.cast_func(self.filter_value))
-        except Exception:
-            return False
+            if filter_type in ["<", "<=", "==", ">", ">="]:
+                filter_value = float(filter_value)  # For numeric columns
+        except ValueError:
+            # Handle invalid numeric input
+            if filter_type in ["<", "<=", "==", ">", ">="]:
+                QMessageBox.warning(self, "Invalid Value", "Please enter a valid number.")
+                return
 
+        # Apply the filter based on the selected filter type
+        try:
+            if filter_type == "contains":
+                self.model._data = self.model._data.filter(pl.col(column_name).str.contains(filter_value))
+            elif filter_type == "starts_with":
+                self.model._data = self.model._data.filter(pl.col(column_name).str.starts_with(filter_value))
+            elif filter_type == "ends_with":
+                self.model._data = self.model._data.filter(pl.col(column_name).str.ends_with(filter_value))
+            elif filter_type == "==":
+                self.model._data = self.model._data.filter(pl.col(column_name) == filter_value)
+            elif filter_type == "<":
+                self.model._data = self.model._data.filter(pl.col(column_name) < filter_value)
+            elif filter_type == "<=":
+                self.model._data = self.model._data.filter(pl.col(column_name) <= filter_value)
+            elif filter_type == ">":
+                self.model._data = self.model._data.filter(pl.col(column_name) > filter_value)
+            elif filter_type == ">=":
+                self.model._data = self.model._data.filter(pl.col(column_name) >= filter_value)
+        except Exception as e:
+            QMessageBox.warning(self, "Filter Error", f"Error applying filter: {str(e)}")
+            return
 
-# Factory method to get filter object
-def create_filter(column_name, column_dtype, operation, value):
-    if column_dtype in ("string", "str"):
-        return StringFilter(column_name, operation, value)
-    elif column_dtype in ("int", "float", "date", "datetime"):
-        # Use appropriate cast functions here if needed
-        cast_func = float if column_dtype in ("int", "float") else str
-        return NumericDateFilter(column_name, operation, value, cast_func=cast_func)
-    else:
-        raise ValueError(f"Unsupported dtype for filtering: {column_dtype}")
-
-
-# GUI helpers
-def get_string_filter_input(parent, column_name):
-    operations = list(STRING_OPERATIONS.keys())
-    op, ok = QInputDialog.getItem(parent, f"Filter {column_name}", "Operation:", operations, editable=False)
-    if not ok:
-        return None
-
-    value, ok = QInputDialog.getText(parent, f"Filter {column_name}", f"Enter text to match:")
-    if not ok:
-        return None
-
-    return op, value
-
-
-def get_numeric_filter_input(parent, column_name):
-    operations = list(NUMERIC_DATE_OPERATIONS.keys())
-    op, ok = QInputDialog.getItem(parent, f"Filter {column_name}", "Operation:", operations, editable=False)
-    if not ok:
-        return None
-
-    value, ok = QInputDialog.getText(parent, f"Filter {column_name}", f"Enter numeric value to match:")
-    if not ok:
-        return None
-
-    return op, value
-
-def apply_filter(df, filter_object):
-    """
-    Apply the given filter object to the DataFrame `df`.
-
-    :param df: DataFrame to apply the filter to.
-    :param filter_object: Filter object (either StringFilter or NumericDateFilter).
-    :return: Filtered DataFrame.
-    """
-    column_name = filter_object.column_name
-    operation = filter_object.operation
-    filter_value = filter_object.filter_value
-
-    # Apply the filter based on the type
-    if isinstance(filter_object, StringFilter):
-        return df.filter(df[column_name].str.contains(filter_value, literal=True))
-    elif isinstance(filter_object, NumericDateFilter):
-        return df.filter(df[column_name].apply(lambda x: filter_object.matches(x)))
-    else:
-        raise ValueError(f"Unsupported filter type: {type(filter_object)}")
+        # Refresh current data
+        self.model._current_data = get_page_data(self.model._data, self.model.get_current_page(), self.model.chunk_size)
+        self.model.layoutChanged.emit()
+        
+        self.update_page_info()  # Refresh UI to reflect new data

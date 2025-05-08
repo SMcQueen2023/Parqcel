@@ -248,29 +248,29 @@ class MainWindow(QMainWindow):
             stats = self.model.get_column_statistics(column_name)
             QMessageBox.information(self, f"Statistics for {column_name}", stats)
         elif action == less_than:
-            self.apply_filter(column_name, "<")
+            self.handle_filter(column_name, "<")
         elif action == less_than_equal:
-            self.apply_filter(column_name, "<=")
+            self.handle_filter(column_name, "<=")
         elif action == equal_to:
-            self.apply_filter(column_name, "==")
+            self.handle_filter(column_name, "==")
         elif action == greater_than:
-            self.apply_filter(column_name, ">")
+            self.handle_filter(column_name, ">")
         elif action == greater_than_equal:
-            self.apply_filter(column_name, ">=")
+            self.handle_filter(column_name, ">=")
         elif action == contains:
-            self.apply_filter(column_name, "contains")
+            self.handle_filter(column_name, "contains")
         elif action == starts_with:
-            self.apply_filter(column_name, "starts_with")
+            self.handle_filter(column_name, "starts_with")
         elif action == ends_with:
-            self.apply_filter(column_name, "ends_with")
+            self.handle_filter(column_name, "ends_with")
         elif action == equals:
-            self.apply_filter(column_name, "==")
+            self.handle_filter(column_name, "==")
 
-    def apply_filter(self, column_name, filter_type):
+    def handle_filter(self, column_name, filter_type):
         if not self.is_model_loaded():
             return
 
-        apply_filter(self, self.model, column_name, filter_type)
+        apply_filter(self, column_name, filter_type)
         self.update_page_info()
 
     def generate_statistics(self):
@@ -330,3 +330,5 @@ class MainWindow(QMainWindow):
             self.update_statistics()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to add column: {e}")
+
+
