@@ -1,29 +1,39 @@
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QFormLayout, QLineEdit, QDialogButtonBox,
-    QComboBox, QDateEdit, QStackedWidget, QSpinBox, QDoubleSpinBox, 
-    QLabel, QMessageBox
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QComboBox,
+    QStackedWidget, QSpinBox, QDoubleSpinBox, QDateEdit, QDateTimeEdit,
+    QPushButton, QMessageBox
 )
-from PyQt6.QtCore import QDate
+from PyQt6.QtCore import QDate, QDateTime
 import polars as pl
 
+
 class AddColumnDialog(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Add New Column")
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Add Column")
+        self.layout = QVBoxLayout()
 
-        self.layout = QVBoxLayout(self)
-        form_layout = QFormLayout()
-
+        # Column name input
+        name_layout = QHBoxLayout()
+        name_label = QLabel("Column Name:")
         self.name_input = QLineEdit()
-        form_layout.addRow("Column Name:", self.name_input)
+        name_layout.addWidget(name_label)
+        name_layout.addWidget(self.name_input)
+        self.layout.addLayout(name_layout)
 
+        # Data type selector
+        type_layout = QHBoxLayout()
+        type_label = QLabel("Data Type:")
         self.type_combo = QComboBox()
-        self.type_combo.addItems(["String", "Integer", "Float", "Date"])
-        form_layout.addRow("Data Type:", self.type_combo)
+        self.type_combo.addItems(["String", "Integer", "Float", "Date", "Datetime"])
+        self.type_combo.currentIndexChanged.connect(self.update_input_widget)
+        type_layout.addWidget(type_label)
+        type_layout.addWidget(self.type_combo)
+        self.layout.addLayout(type_layout)
 
+        # Stacked widget to show appropriate default value input
         self.input_stack = QStackedWidget()
 
-        # Default value widgets
         self.string_input = QLineEdit()
         self.input_stack.addWidget(self.string_input)
 
@@ -31,7 +41,6 @@ class AddColumnDialog(QDialog):
         self.input_stack.addWidget(self.int_input)
 
         self.float_input = QDoubleSpinBox()
-        self.float_input.setDecimals(4)
         self.input_stack.addWidget(self.float_input)
 
         self.date_input = QDateEdit()
@@ -39,38 +48,32 @@ class AddColumnDialog(QDialog):
         self.date_input.setDate(QDate.currentDate())
         self.input_stack.addWidget(self.date_input)
 
-        form_layout.addRow("Default Value:", self.input_stack)
+        self.datetime_input = QDateTimeEdit()
+        self.datetime_input.setCalendarPopup(True)
+        self.datetime_input.setDateTime(QDateTime.currentDateTime())
+        self.input_stack.addWidget(self.datetime_input)
 
-        self.type_combo.currentIndexChanged.connect(self.input_stack.setCurrentIndex)
+        self.layout.addWidget(self.input_stack)
 
-        self.layout.addLayout(form_layout)
+        # OK and Cancel buttons
+        button_layout = QHBoxLayout()
+        ok_button = QPushButton("OK")
+        ok_button.clicked.connect(self.accept)
+        cancel_button = QPushButton("Cancel")
+        cancel_button.clicked.connect(self.reject)
+        button_layout.addWidget(ok_button)
+        button_layout.addWidget(cancel_button)
+        self.layout.addLayout(button_layout)
 
-        self.buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        self.buttons.accepted.connect(self.accept)  # Connect to the new accept() method
-        self.buttons.rejected.connect(self.reject)
-        self.layout.addWidget(self.buttons)
+        self.setLayout(self.layout)
 
-    def accept(self):
-        col_name = self.name_input.text().strip()
-
-        # Validate the column name
-        if not col_name:
-            QMessageBox.warning(self, "Invalid Column Name", "Please enter a column name (no blanks).")
-            return
-        
-        if any(c in col_name for c in r'<>:"/\|?*'):
-            QMessageBox.warning(self, "Invalid Column Name", "The column name contains invalid characters.")
-            return
-
-        super().accept()  # Proceed with the parent accept() method if valid
+    def update_input_widget(self, index):
+        self.input_stack.setCurrentIndex(index)
 
     def get_data(self):
         name = self.name_input.text().strip()
         dtype = self.type_combo.currentText()
 
-        # Convert the data to appropriate types here to reduce duplication in other parts
         if dtype == "String":
             value = self.string_input.text()
         elif dtype == "Integer":
@@ -79,37 +82,40 @@ class AddColumnDialog(QDialog):
             value = self.float_input.value()
         elif dtype == "Date":
             value = self.date_input.date().toString("yyyy-MM-dd")
+        elif dtype == "Datetime":
+            value = self.datetime_input.dateTime().toString("yyyy-MM-ddTHH:mm:ss")
         else:
             value = None
 
         return name, dtype, value
 
 
-def add_column(df: pl.DataFrame, parent=None) -> pl.DataFrame:
-    dialog = AddColumnDialog(parent)
-    if dialog.exec() != QDialog.DialogCode.Accepted:
-        return df
+def add_column(df: pl.DataFrame, parent=None):
+    dialog = AddColumnDialog()
+    if dialog.exec():
+        col_name, dtype, default_value = dialog.get_data()
 
-    col_name, dtype, default_value = dialog.get_data()
+        if col_name in df.columns:
+            QMessageBox.warning(parent, "Error", f"Column '{col_name}' already exists.")
+            return df
 
-    # Validate the column name here before proceeding
-    if not col_name or any(c in col_name for c in r'<>:"/\|?*') or col_name.strip() == "":
-        QMessageBox.warning(parent, "Invalid Column Name", "Please enter a valid column name.")
-        return df
+        try:
+            if dtype == "Integer":
+                default_value = int(default_value)
+                new_col = pl.Series(name=col_name, values=[default_value] * df.height, dtype=pl.Int64)
+            elif dtype == "Float":
+                default_value = float(default_value)
+                new_col = pl.Series(name=col_name, values=[default_value] * df.height, dtype=pl.Float64)
+            elif dtype == "Date":
+                new_col = pl.Series(name=col_name, values=[default_value] * df.height).cast(pl.Date)
+            elif dtype == "Datetime":
+                new_col = pl.Series(name=col_name, values=[default_value] * df.height).cast(pl.Datetime)
+            else:  # String
+                new_col = pl.Series(name=col_name, values=[default_value] * df.height, dtype=pl.Utf8)
 
-    # Try-catch not necessary if proper validation is handled before data conversion
-    try:
-        if dtype == "Integer":
-            default_value = int(default_value)
-        elif dtype == "Float":
-            default_value = float(default_value)
-        elif dtype == "Date":
-            default_value = str(default_value)  # Ensure consistent string format
-        else:
-            default_value = str(default_value)  # For strings
-    except ValueError:
-        QMessageBox.warning(parent, "Invalid Data Type", "Invalid default value for the specified data type.")
-        return df
+            df = df.with_columns(new_col)
 
-    new_col = pl.Series(name=col_name, values=[default_value] * df.height)
-    return df.with_columns([new_col])
+        except Exception as e:
+            QMessageBox.warning(parent, "Error", f"Could not add column: {str(e)}")
+
+    return df
