@@ -19,6 +19,7 @@ from logic.stats import (
     get_page_data,
     calculate_max_pages,
     get_column_statistics,
+    get_column_type_counts_string
 )
 
 class MainWindow(QMainWindow):
@@ -245,7 +246,7 @@ class MainWindow(QMainWindow):
         elif action == drop_col:
             self.model.drop_column(column_name)
         elif action == stats_col:
-            stats = self.model.get_column_statistics(column_name)
+            stats = get_column_statistics(self.model._data, column_name)
             QMessageBox.information(self, f"Statistics for {column_name}", stats)
         elif action == less_than:
             self.handle_filter(column_name, "<")
@@ -304,19 +305,23 @@ class MainWindow(QMainWindow):
 
     def update_statistics(self):
         if not self.is_model_loaded():
-            return None  # Or return an empty dict if your UI expects it
+            return None
 
         df = self.model._data
         row_count = df.height
         total_columns = df.width
-        column_types = get_column_types(df)
+        column_type_counts = get_column_type_counts_string(df)  # Get the string summary of column type counts
+
+        # Update the footer labels
+        self.row_count_label.setText(f"Rows: {row_count}")
+        self.total_column_count_label.setText(f"Total Columns: {total_columns}")
+        self.column_type_count_label.setText(f"Column Type Count: {column_type_counts}")
 
         return {
             "row_count": row_count,
             "total_columns": total_columns,
-            "column_types": column_types
+            "column_types": column_type_counts
         }
-
 
     def handle_add_column(self):
         if not hasattr(self, 'model') or self.model is None:

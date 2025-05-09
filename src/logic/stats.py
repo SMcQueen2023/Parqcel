@@ -62,30 +62,34 @@ def generate_statistics(model):
     full_text = "\n\n".join(stats)
     return full_text
 
+def get_column_types(df: pl.DataFrame) -> dict:
+    """Returns a dictionary with column names as keys and types as values."""
+    return {col: str(dtype) for col, dtype in df.schema.items()}
+
+def get_column_type_counts_string(df: pl.DataFrame) -> str:
+    """
+    Returns a concise string summary like "Utf8: 3, Int64: 2"
+    """
+    column_types = get_column_types(df)  # Get individual column types
+    type_counts = {}
+
+    for dtype in column_types.values():
+        type_counts[dtype] = type_counts.get(dtype, 0) + 1  # Count the occurrences of each type
+
+    return ", ".join(f"{dtype}: {count}" for dtype, count in type_counts.items())
+
 
 def update_statistics(self):
     if hasattr(self, 'model') and self.model is not None:
         df = self.model._data
         row_count = df.height
         total_columns = df.width
-        # Correctly call the function from polars_utils.py
-        column_types = get_column_types(df)
 
         self.row_count_label.setText(f"Rows: {row_count}")
         self.total_column_count_label.setText(f"Total Columns: {total_columns}")
 
-        # Count columns by type
-        type_count = {}
-        for col_name, col_type in column_types.items():
-            if col_type not in type_count:
-                type_count[col_type] = 0
-            type_count[col_type] += 1
-
-        type_count_text = "\n".join([f"{t}: {count}" for t, count in type_count.items()])
-        self.column_type_count_label.setText(f"Column Type Count:\n{type_count_text}")
-
-def get_column_types(df: pl.DataFrame) -> dict:
-    return {col: str(dtype) for col, dtype in df.schema.items()}
+        type_count_text = get_column_type_counts_string(df)
+        self.column_type_count_label.setText(f"Column Type Count: {type_count_text}")
 
 def get_page_data(df: pl.DataFrame, page_number: int, chunk_size: int) -> pl.DataFrame:
     start_row = page_number * chunk_size
