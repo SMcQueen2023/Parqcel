@@ -245,6 +245,7 @@ class MainWindow(QMainWindow):
             self.model.sort_column(column_name, ascending=False)
         elif action == drop_col:
             self.model.drop_column(column_name)
+            self.update_statistics()
         elif action == stats_col:
             stats = get_column_statistics(self.model._data, column_name)
             QMessageBox.information(self, f"Statistics for {column_name}", stats)
