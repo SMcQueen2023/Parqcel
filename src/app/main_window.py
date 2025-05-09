@@ -178,7 +178,7 @@ class MainWindow(QMainWindow):
             return
         page_number = self.page_input.text()
         if page_number.isdigit():
-            page_number = int(page_number)
+            page_number = int(page_number) -1  # Convert to zero-based index
             self.model.jump_to_page(page_number)
             self.update_page_info()
 
