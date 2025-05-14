@@ -219,7 +219,7 @@ class MainWindow(QMainWindow):
         equals = None
 
         # Add filtering options based on column type
-        if dtype in [pl.Int64, pl.Int32, pl.Float64, pl.Float32, pl.Date]:
+        if dtype in [pl.Int64, pl.Int32, pl.Float64, pl.Float32, pl.Date, pl.Datetime]:
             filter_menu = QMenu("Filter", self)
             less_than = filter_menu.addAction("Less than")
             less_than_equal = filter_menu.addAction("Less than or equal to")

@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import QApplication
-from app.main_window import MainWindow  # Correct import path
-from models.polars_table_model import PolarsTableModel  # Correct import path
+from app.main_window import MainWindow
+from models.polars_table_model import PolarsTableModel
 
 def main():
     app = QApplication([])
