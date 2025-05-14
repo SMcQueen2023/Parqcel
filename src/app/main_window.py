@@ -238,7 +238,8 @@ class MainWindow(QMainWindow):
 
         # Execute the menu and handle the selected action
         action = menu.exec(self.table_view.mapToGlobal(pos))
-
+        if action is None:
+            return
         if action == sort_asc:
             self.model.sort_column(column_name, ascending=True)
         elif action == sort_desc:
