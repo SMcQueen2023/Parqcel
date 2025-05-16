@@ -9,7 +9,8 @@ import polars as pl
 import os
 from logic.filters import apply_filter  # Import logic to apply filters to dataframe
 from models.polars_table_model import PolarsTableModel  # Import the model class
-from app.edit_dialogs import add_column  # Import add_column function
+from app.widgets.edit_menu_gui import AddColumnDialog
+from app.edit_menu_controller import add_column
 from logic.stats import (
     get_numeric_stats,
     get_string_stats,
@@ -326,16 +327,15 @@ class MainWindow(QMainWindow):
         }
 
     def handle_add_column(self):
-        if not hasattr(self, 'model') or self.model is None:
-            QMessageBox.warning(self, "No Data", "No file is loaded.")
+        if not self.is_model_loaded():
             return
 
-        try:
-            df = self.model._data
-            updated_df = add_column(df, self)  # `self` is passed in case the logic needs UI interaction
-            self.model.update_data(updated_df)
-            self.update_statistics()
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to add column: {e}")
-
-
+        dialog = AddColumnDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            column_name, dtype, default_value = dialog.get_data()  # use get_data(), not get_inputs()
+            try:
+                new_df = add_column(self.model._data, column_name, dtype, default_value)  # Pass DataFrame
+                self.model.update_data(new_df)  # Update the model with the new DataFrame
+                self.update_statistics()
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to add column: {e}")

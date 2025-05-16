@@ -1,17 +1,18 @@
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QComboBox,
     QStackedWidget, QSpinBox, QDoubleSpinBox, QDateEdit, QDateTimeEdit,
-    QPushButton, QMessageBox
+    QPushButton
 )
 from PyQt6.QtCore import QDate, QDateTime
-import polars as pl
 
 
 class AddColumnDialog(QDialog):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, parent=None):
+        super().__init__(parent)
         self.setWindowTitle("Add Column")
-        self.layout = QVBoxLayout()
+
+        # Use a less generic variable name to avoid conflicts
+        self.main_layout = QVBoxLayout()
 
         # Column name input
         name_layout = QHBoxLayout()
@@ -19,7 +20,7 @@ class AddColumnDialog(QDialog):
         self.name_input = QLineEdit()
         name_layout.addWidget(name_label)
         name_layout.addWidget(self.name_input)
-        self.layout.addLayout(name_layout)
+        self.main_layout.addLayout(name_layout)
 
         # Data type selector
         type_layout = QHBoxLayout()
@@ -29,9 +30,9 @@ class AddColumnDialog(QDialog):
         self.type_combo.currentIndexChanged.connect(self.update_input_widget)
         type_layout.addWidget(type_label)
         type_layout.addWidget(self.type_combo)
-        self.layout.addLayout(type_layout)
+        self.main_layout.addLayout(type_layout)
 
-        # Stacked widget to show appropriate default value input
+        # Stacked widget for default values
         self.input_stack = QStackedWidget()
 
         self.string_input = QLineEdit()
@@ -53,9 +54,9 @@ class AddColumnDialog(QDialog):
         self.datetime_input.setDateTime(QDateTime.currentDateTime())
         self.input_stack.addWidget(self.datetime_input)
 
-        self.layout.addWidget(self.input_stack)
+        self.main_layout.addWidget(self.input_stack)
 
-        # OK and Cancel buttons
+        # Buttons
         button_layout = QHBoxLayout()
         ok_button = QPushButton("OK")
         ok_button.clicked.connect(self.accept)
@@ -63,9 +64,9 @@ class AddColumnDialog(QDialog):
         cancel_button.clicked.connect(self.reject)
         button_layout.addWidget(ok_button)
         button_layout.addWidget(cancel_button)
-        self.layout.addLayout(button_layout)
+        self.main_layout.addLayout(button_layout)
 
-        self.setLayout(self.layout)
+        self.setLayout(self.main_layout)
 
     def update_input_widget(self, index):
         self.input_stack.setCurrentIndex(index)
@@ -81,41 +82,10 @@ class AddColumnDialog(QDialog):
         elif dtype == "Float":
             value = self.float_input.value()
         elif dtype == "Date":
-            value = self.date_input.date().toString("yyyy-MM-dd")
+            value = self.date_input.date().toPyDate()  # Fix here
         elif dtype == "Datetime":
-            value = self.datetime_input.dateTime().toString("yyyy-MM-ddTHH:mm:ss")
+            value = self.datetime_input.dateTime().toPyDateTime()  # Fix here
         else:
             value = None
 
         return name, dtype, value
-
-
-def add_column(df: pl.DataFrame, parent=None):
-    dialog = AddColumnDialog()
-    if dialog.exec():
-        col_name, dtype, default_value = dialog.get_data()
-
-        if col_name in df.columns:
-            QMessageBox.warning(parent, "Error", f"Column '{col_name}' already exists.")
-            return df
-
-        try:
-            if dtype == "Integer":
-                default_value = int(default_value)
-                new_col = pl.Series(name=col_name, values=[default_value] * df.height, dtype=pl.Int64)
-            elif dtype == "Float":
-                default_value = float(default_value)
-                new_col = pl.Series(name=col_name, values=[default_value] * df.height, dtype=pl.Float64)
-            elif dtype == "Date":
-                new_col = pl.Series(name=col_name, values=[default_value] * df.height).cast(pl.Date)
-            elif dtype == "Datetime":
-                new_col = pl.Series(name=col_name, values=[default_value] * df.height).cast(pl.Datetime)
-            else:  # String
-                new_col = pl.Series(name=col_name, values=[default_value] * df.height, dtype=pl.Utf8)
-
-            df = df.with_columns(new_col)
-
-        except Exception as e:
-            QMessageBox.warning(parent, "Error", f"Could not add column: {str(e)}")
-
-    return df
