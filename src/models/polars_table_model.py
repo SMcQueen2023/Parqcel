@@ -168,3 +168,15 @@ class PolarsTableModel(QAbstractTableModel):
         self._current_data = get_page_data(self._data, self._current_page, self.chunk_size)
         self._column_types = get_column_types(self._data)
         self.layoutChanged.emit()
+
+    def sort_multiple_columns(self, columns: list[str], directions: list[bool]):
+        try:
+            print(f"Sorting data by columns: {columns} with directions: {directions}")
+            sorted_df = self._data.sort(by=columns, descending=[not d for d in directions])
+            self.update_data(sorted_df)  # <-- use update_data to handle all updates properly
+            print("Sorting completed and model updated.")
+        except Exception as e:
+            print(f"Error sorting multiple columns: {e}")
+
+    def get_column_names(self):
+        return list(self._data.columns)

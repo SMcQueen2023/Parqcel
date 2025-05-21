@@ -1,6 +1,6 @@
 import polars as pl
 from PyQt6.QtWidgets import QMessageBox
-from app.widgets.edit_menu_gui import AddColumnDialog
+from app.widgets.edit_menu_gui import AddColumnDialog, MultiSortDialog, SortRuleWidget
 
 def add_column(df: pl.DataFrame, col_name: str, dtype: str, default_value) -> pl.DataFrame:
     if not col_name:
