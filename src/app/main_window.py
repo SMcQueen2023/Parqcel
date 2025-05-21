@@ -9,7 +9,7 @@ import polars as pl
 import os
 from logic.filters import apply_filter  # Import logic to apply filters to dataframe
 from models.polars_table_model import PolarsTableModel  # Import the model class
-from app.widgets.edit_menu_gui import AddColumnDialog
+from app.widgets.edit_menu_gui import AddColumnDialog, MultiSortDialog, SortRuleWidget
 from app.edit_menu_controller import add_column
 from logic.stats import (
     get_numeric_stats,
@@ -105,9 +105,15 @@ class MainWindow(QMainWindow):
         # Edit menu
         edit_menu = menu_bar.addMenu("Edit")
 
+        # Add column action
         add_column_action = QAction("Add Column", self)
         add_column_action.triggered.connect(self.handle_add_column)
         edit_menu.addAction(add_column_action)
+
+        # Multi-Sort action
+        sort_columns_action = QAction("Sort Columns...", self)
+        sort_columns_action.triggered.connect(self.handle_multi_sort)
+        edit_menu.addAction(sort_columns_action)
 
     def open_file(self):
         file_dialog = QFileDialog(self)
@@ -332,10 +338,33 @@ class MainWindow(QMainWindow):
 
         dialog = AddColumnDialog(self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            column_name, dtype, default_value = dialog.get_data()  # use get_data(), not get_inputs()
+            column_name, dtype, default_value = dialog.get_data()
             try:
                 new_df = add_column(self.model._data, column_name, dtype, default_value)  # Pass DataFrame
                 self.model.update_data(new_df)  # Update the model with the new DataFrame
                 self.update_statistics()
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to add column: {e}")
+    
+    def handle_multi_sort(self):
+        if not self.is_model_loaded():
+            print("Model is not loaded, cannot sort.")
+            return
+
+        dialog = MultiSortDialog(self.model.get_column_names(), parent=self)
+        result = dialog.exec()
+        print("MultiSortDialog exec result:", result)
+
+        if result == QDialog.DialogCode.Accepted:
+            print("Dialog accepted.")
+            criteria = dialog.get_sorting_criteria()  # List of (column_name, ascending_bool) tuples
+            print("Sorting criteria received:", criteria)
+
+            if criteria:
+                columns, directions = zip(*criteria)  # unzip into two lists
+                print(f"Sorting columns: {columns} with directions: {directions}")
+                self.model.sort_multiple_columns(list(columns), list(directions))
+            else:
+                print("No sort criteria provided.")
+        else:
+            print("Dialog canceled or closed without accepting.")
