@@ -11,6 +11,7 @@ from logic.stats import (
     get_column_statistics,
     get_column_type_counts_string
 )
+from datetime import datetime, date
 
 class PolarsTableModel(QAbstractTableModel):
     def __init__(self, data: pl.DataFrame, chunk_size=10000):
@@ -78,16 +79,34 @@ class PolarsTableModel(QAbstractTableModel):
                     value = int(value)
                 elif dtype in [pl.Float64, pl.Float32]:
                     value = float(value)
+                elif dtype == pl.Date:
+                    # Try parsing string to date
+                    if isinstance(value, str):
+                        value = datetime.strptime(value, "%Y-%m-%d").date()
+                    elif not isinstance(value, date):
+                        return False
+                elif dtype == pl.Datetime:
+                    # Try parsing string to datetime
+                    if isinstance(value, str):
+                        value = datetime.fromisoformat(value)
+                    elif not isinstance(value, datetime):
+                        return False
                 else:
                     value = str(value)
-            except ValueError:
+            except Exception:
                 return False
 
             col_values = self._data[col_name].to_list()
             col_values[row] = value
-            new_col = pl.Series(name=col_name, values=col_values)
-            self._data = self._data.with_columns(new_col)
 
+            # Fix: Create series with dtype fallback
+            try:
+                new_col = pl.Series(name=col_name, values=col_values, dtype=dtype)
+            except Exception:
+                # Last-resort fallback if dtype fails, use strict=False
+                new_col = pl.Series(name=col_name, values=col_values, strict=False)
+
+            self._data = self._data.with_columns(new_col)
             self._current_data = get_page_data(self._data, self._current_page, self.chunk_size)
 
             self.dataChanged.emit(index, index, [Qt.ItemDataRole.DisplayRole])
