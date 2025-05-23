@@ -322,7 +322,7 @@ class MainWindow(QMainWindow):
         column_type_counts = get_column_type_counts_string(df)  # Get the string summary of column type counts
 
         # Update the footer labels
-        self.row_count_label.setText(f"Rows: {row_count}")
+        self.row_count_label.setText(f"Total Rows: {row_count}")
         self.total_column_count_label.setText(f"Total Columns: {total_columns}")
         self.column_type_count_label.setText(f"Column Type Count: {column_type_counts}")
 
