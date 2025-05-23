@@ -1,122 +1,183 @@
 import polars as pl
-from PyQt6.QtWidgets import QMessageBox
+from typing import List
 
-def get_numeric_stats(series):
-    min_val, max_val = series.min(), series.max()
-    mean_val = series.mean()
+def _value_count_summary(series: pl.Series, max_items: int = 5) -> list[str]:
+    """
+    Return top value counts and percentages for a series,
+    dynamically detecting the counts column.
+    """
+    vc_df = series.value_counts()
+
+    cols = vc_df.columns
+    if len(cols) != 2:
+        return ["Value counts unavailable due to unexpected output format."]
+
+    # Use helper function to detect numeric dtype
+    def _is_numeric_dtype(dtype) -> bool:
+        numeric_types = {
+            pl.Int8, pl.Int16, pl.Int32, pl.Int64,
+            pl.UInt8, pl.UInt16, pl.UInt32, pl.UInt64,
+            pl.Float32, pl.Float64
+        }
+        return dtype in numeric_types
+
+    if _is_numeric_dtype(vc_df[cols[0]].dtype):
+        count_col = cols[0]
+        value_col = cols[1]
+    elif _is_numeric_dtype(vc_df[cols[1]].dtype):
+        count_col = cols[1]
+        value_col = cols[0]
+    else:
+        return ["Value counts unavailable due to no numeric counts column."]
+
+    total = len(series)
+    lines = []
+    for row in vc_df.sort(count_col, descending=True).head(max_items).iter_rows(named=True):
+        value = row[value_col]
+        count = row[count_col]
+        percentage = (count / total) * 100 if total > 0 else 0
+        lines.append(f"{repr(value)}: {count} ({percentage:.2f}%)")
+
+    return lines
+
+def get_numeric_stats(series: pl.Series) -> List[str]:
     return [
-        f"Min: {min_val}",
-        f"Max: {max_val}",
-        f"Mean: {mean_val:.2f}",
+        f"Non-Nulls: {series.drop_nulls().len()}",
+        f"Nulls: {series.is_null().sum()}",
+        f"Unique: {series.n_unique()}",
+        f"Min: {series.min()}",
+        f"Max: {series.max()}",
+        f"Mean: {series.mean():.2f}",
         f"Median: {series.median()}",
         f"Std Dev: {series.std():.2f}",
-        f"Variance: {series.var():.2f}"
+        f"Variance: {series.var():.2f}",
+        f"Mode: {series.mode()[0] if series.mode().len() > 0 else 'N/A'}"
     ]
 
-def get_string_stats(series):
-    non_null_series = series.drop_nulls()
-    str_lengths = non_null_series.cast(str).str.len_chars()
+def get_string_stats(series: pl.Series) -> List[str]:
+    non_null = series.drop_nulls().cast(str)
+    lengths = non_null.str.len_chars()
+
+    stats = [
+        f"Non-Nulls: {non_null.len()}",
+        f"Nulls: {series.is_null().sum()}",
+        f"Blanks: {(series == '').sum()}",
+        f"Unique: {series.n_unique()}",
+        f"Min Length: {lengths.min()}",
+        f"Max Length: {lengths.max()}",
+        f"Median Length: {lengths.median()}",
+        f"Mean Length: {lengths.mean():.2f}"
+    ]
+
+    stats.append("Top Values:")
+    stats.extend(_value_count_summary(series))
+    return stats
+
+def get_boolean_stats(series: pl.Series) -> List[str]:
+    return [
+        f"Non-Nulls: {series.drop_nulls().len()}",
+        f"Nulls: {series.is_null().sum()}",
+        f"True: {(series == True).sum()}",
+        f"False: {(series == False).sum()}",
+        f"Mode: {series.mode()[0] if series.mode().len() > 0 else 'N/A'}"
+    ]
+
+def get_date_stats(series: pl.Series) -> List[str]:
+    return [
+        f"Non-Nulls: {series.drop_nulls().len()}",
+        f"Nulls: {series.is_null().sum()}",
+        f"Unique: {series.n_unique()}",
+        f"Earliest: {series.min()}",
+        f"Latest: {series.max()}",
+        f"Median: {series.median()}",
+        f"Mode: {series.mode()[0] if series.mode().len() > 0 else 'N/A'}"
+    ]
+
+def get_datetime_stats(series: pl.Series) -> List[str]:
+    min_val = series.min()
+    max_val = series.max()
+    range_val = max_val - min_val if min_val is not None and max_val is not None else None
 
     return [
-        f"Unique Values: {series.n_unique()}",
-        f"Blanks: {(series == '').sum()}",
+        f"Non-Nulls: {series.drop_nulls().len()}",
         f"Nulls: {series.is_null().sum()}",
-        f"Min Length: {str_lengths.min()}",
-        f"Max Length: {str_lengths.max()}",
-        f"Median Length: {str_lengths.median()}",
-        f"Average Length: {str_lengths.mean():.2f}"
+        f"Unique: {series.n_unique()}",
+        f"Min: {min_val}",
+        f"Max: {max_val}",
+        f"Range: {range_val if range_val else 'N/A'}",
+        f"Median: {series.median()}",
+        f"Mode: {series.mode()[0] if series.mode().len() > 0 else 'N/A'}"
     ]
 
-def generate_statistics(model):
+def get_fallback_stats(series: pl.Series) -> List[str]:
+    return [
+        f"Type: {series.dtype}",
+        f"Nulls: {series.is_null().sum()}",
+        f"Unique: {series.n_unique()}",
+        "Stats not supported for this type."
+    ]
+
+def get_stats_for_column(series: pl.Series) -> List[str]:
+    dtype = series.dtype
+
+    if dtype in [pl.Int8, pl.Int16, pl.Int32, pl.Int64,
+                 pl.UInt8, pl.UInt16, pl.UInt32, pl.UInt64,
+                 pl.Float32, pl.Float64]:
+        return get_numeric_stats(series)
+    elif dtype in [pl.Utf8, pl.Categorical]:
+        return get_string_stats(series)
+    elif dtype == pl.Boolean:
+        return get_boolean_stats(series)
+    elif dtype == pl.Date:
+        return get_date_stats(series)
+    elif dtype == pl.Datetime or dtype == pl.Time:
+        return get_datetime_stats(series)
+    else:
+        return get_fallback_stats(series)
+
+def generate_statistics(model) -> str:
     if not hasattr(model, '_data') or model._data is None:
-        raise ValueError("Model does not contain data.")
-    
-    df = model._data
-    if df.height == 0:
-        return "No data available to generate statistics."
+        raise ValueError("Model does not contain a valid DataFrame.")
+
+    df: pl.DataFrame = model._data
+    if df.is_empty():
+        return "No data available."
 
     stats = []
 
-    type_handlers = {
-        pl.Int64: get_numeric_stats,
-        pl.Int32: get_numeric_stats,
-        pl.Float64: get_numeric_stats,
-        pl.Float32: get_numeric_stats,
-        pl.Utf8: get_string_stats,
-        pl.Categorical: get_string_stats
-    }
+    for col_name in df.columns:
+        col_series = df[col_name]
+        col_header = f"📊 Column: {col_name} ({col_series.dtype})"
+        col_stats = get_stats_for_column(col_series)
+        stats.append("\n".join([col_header] + col_stats))
 
-    for col in df.columns:
-        col_stats = [f"Column: {col} ({df.schema[col]})"]
-        dtype = df.schema[col]
-        series = df[col]
-
-        handler = type_handlers.get(dtype)
-        if handler:
-            col_stats.extend(handler(series))
-        else:
-            col_stats.append("Statistics not supported for this type.")
-        
-        stats.append("\n".join(col_stats))
-    
-    full_text = "\n\n".join(stats)
-    return full_text
+    return "\n\n".join(stats)
 
 def get_column_types(df: pl.DataFrame) -> dict:
-    """Returns a dictionary with column names as keys and types as values."""
     return {col: str(dtype) for col, dtype in df.schema.items()}
 
 def get_column_type_counts_string(df: pl.DataFrame) -> str:
-    """
-    Returns a concise string summary like "Utf8: 3, Int64: 2"
-    """
-    column_types = get_column_types(df)  # Get individual column types
-    type_counts = {}
-
-    for dtype in column_types.values():
-        type_counts[dtype] = type_counts.get(dtype, 0) + 1  # Count the occurrences of each type
-
+    from collections import Counter
+    type_counts = Counter(str(dtype) for dtype in df.schema.values())
     return ", ".join(f"{dtype}: {count}" for dtype, count in type_counts.items())
-
 
 def update_statistics(self):
     if hasattr(self, 'model') and self.model is not None:
         df = self.model._data
-        row_count = df.height
-        total_columns = df.width
-
-        self.row_count_label.setText(f"Rows: {row_count}")
-        self.total_column_count_label.setText(f"Total Columns: {total_columns}")
-
-        type_count_text = get_column_type_counts_string(df)
-        self.column_type_count_label.setText(f"Column Type Count: {type_count_text}")
+        self.row_count_label.setText(f"Total Rows: {df.height}")
+        self.total_column_count_label.setText(f"Total Columns: {df.width}")
+        self.column_type_count_label.setText(
+            f"Column Type Count: {get_column_type_counts_string(df)}"
+        )
 
 def get_page_data(df: pl.DataFrame, page_number: int, chunk_size: int) -> pl.DataFrame:
-    start_row = page_number * chunk_size
-    return df.slice(start_row, chunk_size)
+    return df.slice(page_number * chunk_size, chunk_size)
 
 def calculate_max_pages(row_count: int, chunk_size: int) -> int:
     return (row_count + chunk_size - 1) // chunk_size
 
 def get_column_statistics(df: pl.DataFrame, column_name: str) -> str:
-    col = df[column_name]
-    dtype = df.schema[column_name]
-    stats = ""
-    if dtype in [pl.Utf8, pl.Categorical]:
-        stats += f"Unique Values: {col.n_unique()}\n"
-        stats += f"Blanks: {(col == '').sum()}\n"
-        stats += f"Nulls: {col.is_null().sum()}\n"
-        value_counts = col.value_counts()
-        for value, count in value_counts.iter_rows():
-            percentage = (count / df.height) * 100
-            stats += f"'{value}': {percentage:.2f}%\n"
-    elif dtype in [pl.Int64, pl.Int32, pl.Float64, pl.Float32]:
-        stats += f"Min: {col.min()}\n"
-        stats += f"Max: {col.max()}\n"
-        stats += f"Mean: {col.mean():.2f}\n"
-        stats += f"Median: {col.median()}\n"
-        stats += f"Std Dev: {col.std():.2f}\n"
-        stats += f"Variance: {col.var():.2f}\n"
-    else:
-        stats += "Statistics not supported for this column type."
-    return stats
+    if column_name not in df.columns:
+        return "Column not found."
+    stats = get_stats_for_column(df[column_name])
+    return "\n".join(stats)
