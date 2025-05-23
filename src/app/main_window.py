@@ -51,7 +51,7 @@ class MainWindow(QMainWindow):
 
         # Footer column statistics layout (Row count, Column count, Column type count)
         self.stats_layout = QVBoxLayout()
-        self.row_count_label = QLabel("Rows: 0")
+        self.row_count_label = QLabel("Total Rows: 0")
         self.total_column_count_label = QLabel("Total Columns: 0")
         self.column_type_count_label = QLabel("Column Type Count: {}")
         self.stats_layout.addWidget(self.row_count_label)
