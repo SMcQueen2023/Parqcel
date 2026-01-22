@@ -12,6 +12,9 @@ from logic.stats import (
     get_column_type_counts_string
 )
 from datetime import datetime, date
+import logging
+
+logger = logging.getLogger(__name__)
 
 class PolarsTableModel(QAbstractTableModel):
     def __init__(self, data: pl.DataFrame, chunk_size=10000):
@@ -192,12 +195,12 @@ class PolarsTableModel(QAbstractTableModel):
 
     def sort_multiple_columns(self, columns: list[str], directions: list[bool]):
         try:
-            print(f"Sorting data by columns: {columns} with directions: {directions}")
+            logger.info("Sorting data by columns: %s with directions: %s", columns, directions)
             sorted_df = self._data.sort(by=columns, descending=[not d for d in directions])
             self.update_data(sorted_df)  # <-- use update_data to handle all updates properly
-            print("Sorting completed and model updated.")
+            logger.debug("Sorting completed and model updated.")
         except Exception as e:
-            print(f"Error sorting multiple columns: {e}")
+            logger.exception("Error sorting multiple columns: %s", e)
 
     def get_column_names(self):
         return list(self._data.columns)

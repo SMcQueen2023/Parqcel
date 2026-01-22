@@ -1,4 +1,54 @@
 # Parqcel
+
+Parqcel is a desktop application built with PyQt6 and Polars that lets you open, view, edit, and analyze Parquet, CSV, and Excel files using a fast, spreadsheet-like interface.
+
+Quickstart
+
+1. Clone the repo:
+
+   git clone https://github.com/SMcQueen2023/parqcel.git
+   cd parqcel
+
+2. Create and activate a virtualenv (Windows PowerShell shown):
+
+   py -3 -m venv venv
+   .\venv\Scripts\Activate.ps1
+
+3. Install dependencies:
+
+   pip install -r requirements.txt
+
+4. Run the app:
+
+   py -3 -m main
+
+Running tests
+
+Install test deps and run:
+
+```powershell
+py -3 -m pip install -r requirements.txt
+py -3 -m pip install pytest pytest-qt
+py -3 -m pytest -q
+```
+
+What it does
+
+- Fast pagination for large datasets
+- Inline editing with undo/redo
+- Column stats and quick filters
+- Save changes back to Parquet
+
+Developer notes
+
+- Formatting and linting: use `black` and `ruff`; config is in `pyproject.toml`.
+- Type checking: `mypy` configured via `mypy.ini`.
+- CI: GitHub Actions workflow is in `.github/workflows/ci.yml`.
+
+Author
+
+Scott McQueen — Data Engineer
+# Parqcel
 Parqcel is a desktop application built with PyQt6 and Polars that allows users to open, view, edit, and analyze large Parquet files using a spreadsheet-like interface. It features fast pagination, inline cell editing, undo/redo functionality, and descriptive statistics at the dataset and column levels.
 
 # 🚀 Features

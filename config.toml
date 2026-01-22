@@ -1,0 +1,4 @@
+# Parqcel runtime configuration
+[app]
+chunk_size = 10000
+log_level = "INFO"

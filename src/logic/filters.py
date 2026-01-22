@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import QDate, QDateTime
 import datetime
 import polars as pl
+from .filtering import apply_filter_to_df
 
 def apply_filter(self, column_name, filter_type):
     # Determine column data type first
@@ -169,33 +170,10 @@ def apply_filter(self, column_name, filter_type):
         QMessageBox.warning(self, "Invalid Input", str(e))
         return
 
-    # Apply the actual filter
+    # Apply the actual filter using the pure helper
     try:
-        col = pl.col(column_name)
         df = self.model._data
-        if filter_type == "contains":
-            filtered_df = df.filter(col.str.contains(filter_value))
-        elif filter_type == "starts_with":
-            filtered_df = df.filter(col.str.starts_with(filter_value))
-        elif filter_type == "ends_with":
-            filtered_df = df.filter(col.str.ends_with(filter_value))
-        elif filter_type == "==":
-            filtered_df = df.filter(col == filter_value)
-        elif filter_type == "between":
-            start_value, end_value = filter_value
-            if start_value > end_value:
-                start_value, end_value = end_value, start_value
-            filtered_df = df.filter(col >= start_value).filter(col <= end_value)
-        elif filter_type == "<":
-            filtered_df = df.filter(col < filter_value)
-        elif filter_type == "<=":
-            filtered_df = df.filter(col <= filter_value)
-        elif filter_type == ">":
-            filtered_df = df.filter(col > filter_value)
-        elif filter_type == ">=":
-            filtered_df = df.filter(col >= filter_value)
-        else:
-            raise ValueError(f"Unsupported filter operation: {filter_type}")
+        filtered_df = apply_filter_to_df(df, column_name, filter_type, filter_value)
     except Exception as e:
         QMessageBox.warning(self, "Filter Error", f"Error applying filter: {str(e)}")
         return
