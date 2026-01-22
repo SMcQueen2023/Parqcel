@@ -340,6 +340,16 @@ class MainWindow(QMainWindow):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             column_name, dtype, default_value = dialog.get_data()
             try:
+                if not column_name:
+                    QMessageBox.warning(self, "Invalid Column Name", "Column name cannot be empty.")
+                    return
+                if column_name in self.model._data.columns:
+                    QMessageBox.warning(
+                        self,
+                        "Duplicate Column",
+                        f"A column named '{column_name}' already exists."
+                    )
+                    return
                 new_df = add_column(self.model._data, column_name, dtype, default_value)  # Pass DataFrame
                 self.model.update_data(new_df)  # Update the model with the new DataFrame
                 self.update_statistics()
