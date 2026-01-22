@@ -161,7 +161,7 @@ class MainWindow(QMainWindow):
             try:
                 self.model._data.write_parquet(file_name)
             except Exception as e:
-                print(f"Error saving file: {e}")
+                QMessageBox.critical(self, "Save Error", f"Error saving file: {e}")
     
     def is_model_loaded(self):
         if not hasattr(self, 'model') or self.model is None:

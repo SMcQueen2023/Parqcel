@@ -5,7 +5,6 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import QDate, QDateTime
 import datetime
 import polars as pl
-from logic.stats import get_page_data
 
 def apply_filter(self, column_name, filter_type):
     # Determine column data type first
@@ -77,8 +76,6 @@ def apply_filter(self, column_name, filter_type):
         if not ok or not filter_value:
             return
 
-    self.model.save_state()  # Save current state for undo
-
     # Parse filter_value based on column dtype
     try:
         if column_dtype in [pl.Float32, pl.Float64,
@@ -108,31 +105,28 @@ def apply_filter(self, column_name, filter_type):
     # Apply the actual filter
     try:
         col = pl.col(column_name)
+        df = self.model._data
         if filter_type == "contains":
-            self.model._data = self.model._data.filter(col.str.contains(filter_value))
+            filtered_df = df.filter(col.str.contains(filter_value))
         elif filter_type == "starts_with":
-            self.model._data = self.model._data.filter(col.str.starts_with(filter_value))
+            filtered_df = df.filter(col.str.starts_with(filter_value))
         elif filter_type == "ends_with":
-            self.model._data = self.model._data.filter(col.str.ends_with(filter_value))
+            filtered_df = df.filter(col.str.ends_with(filter_value))
         elif filter_type == "==":
-            self.model._data = self.model._data.filter(col == filter_value)
+            filtered_df = df.filter(col == filter_value)
         elif filter_type == "<":
-            self.model._data = self.model._data.filter(col < filter_value)
+            filtered_df = df.filter(col < filter_value)
         elif filter_type == "<=":
-            self.model._data = self.model._data.filter(col <= filter_value)
+            filtered_df = df.filter(col <= filter_value)
         elif filter_type == ">":
-            self.model._data = self.model._data.filter(col > filter_value)
+            filtered_df = df.filter(col > filter_value)
         elif filter_type == ">=":
-            self.model._data = self.model._data.filter(col >= filter_value)
+            filtered_df = df.filter(col >= filter_value)
+        else:
+            raise ValueError(f"Unsupported filter operation: {filter_type}")
     except Exception as e:
         QMessageBox.warning(self, "Filter Error", f"Error applying filter: {str(e)}")
         return
 
-    # Refresh table view
-    self.model._current_data = get_page_data(
-        self.model._data,
-        self.model.get_current_page(),
-        self.model.chunk_size
-    )
-    self.model.layoutChanged.emit()
+    self.model.update_data(filtered_df)
     self.update_page_info()
