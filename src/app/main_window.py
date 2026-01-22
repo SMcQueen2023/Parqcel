@@ -39,8 +39,10 @@ class MainWindow(QMainWindow):
 
         # Button Layout for pagination and actions
         self.pagination_layout = QHBoxLayout()
-        self.prev_button = QPushButton("Previous Page")
-        self.next_button = QPushButton("Next Page")
+        self.first_button = QPushButton("⏮")
+        self.prev_button = QPushButton("◀")
+        self.next_button = QPushButton("▶")
+        self.last_button = QPushButton("⏭")
         self.page_input = QLineEdit()
         self.page_input.setPlaceholderText("Jump to page")
         self.page_input.setFixedWidth(100)
@@ -48,6 +50,11 @@ class MainWindow(QMainWindow):
         self.page_info_label = QLabel()
         self.undo_button = QPushButton("Undo")
         self.redo_button = QPushButton("Redo")
+
+        self.first_button.setToolTip("First Page")
+        self.prev_button.setToolTip("Previous Page")
+        self.next_button.setToolTip("Next Page")
+        self.last_button.setToolTip("Last Page")
 
         # Footer column statistics layout (Row count, Column count, Column type count)
         self.stats_layout = QVBoxLayout()
@@ -59,8 +66,10 @@ class MainWindow(QMainWindow):
         self.stats_layout.addWidget(self.column_type_count_label)
 
         # Set button styles
+        self.pagination_layout.addWidget(self.first_button)
         self.pagination_layout.addWidget(self.prev_button)
         self.pagination_layout.addWidget(self.next_button)
+        self.pagination_layout.addWidget(self.last_button)
         self.pagination_layout.addWidget(self.page_input)
         self.pagination_layout.addWidget(self.jump_button)
         self.pagination_layout.addWidget(self.page_info_label)
@@ -78,8 +87,10 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(container)
 
         # Connect Click events to methods
+        self.first_button.clicked.connect(self.load_first_page)
         self.prev_button.clicked.connect(self.load_previous_page)
         self.next_button.clicked.connect(self.load_next_page)
+        self.last_button.clicked.connect(self.load_last_page)
         self.jump_button.clicked.connect(self.jump_to_page)
 
     def _createMenuBar(self):
@@ -161,7 +172,7 @@ class MainWindow(QMainWindow):
             try:
                 self.model._data.write_parquet(file_name)
             except Exception as e:
-                print(f"Error saving file: {e}")
+                QMessageBox.critical(self, "Save Error", f"Error saving file: {e}")
     
     def is_model_loaded(self):
         if not hasattr(self, 'model') or self.model is None:
@@ -179,6 +190,18 @@ class MainWindow(QMainWindow):
         if not self.is_model_loaded():
             return
         self.model.load_previous_page()
+        self.update_page_info()
+
+    def load_first_page(self):
+        if not self.is_model_loaded():
+            return
+        self.model.jump_to_page(0)
+        self.update_page_info()
+
+    def load_last_page(self):
+        if not self.is_model_loaded():
+            return
+        self.model.jump_to_page(self.model.get_max_pages() - 1)
         self.update_page_info()
 
     def jump_to_page(self):
@@ -212,6 +235,7 @@ class MainWindow(QMainWindow):
         sort_desc = menu.addAction("Sort Descending")
         drop_col = menu.addAction("Drop Column")
         stats_col = menu.addAction("Generate Statistics")
+        convert_type = menu.addAction("Convert Type...")
 
         # Initialize filter menu and actions
         filter_menu = None
@@ -220,19 +244,24 @@ class MainWindow(QMainWindow):
         equal_to = None
         greater_than = None
         greater_than_equal = None
+        between = None
         contains = None
         starts_with = None
         ends_with = None
         equals = None
 
         # Add filtering options based on column type
-        if dtype in [pl.Int64, pl.Int32, pl.Float64, pl.Float32, pl.Date, pl.Datetime]:
+        if dtype in [pl.Int64, pl.Int32, pl.Float64, pl.Float32]:
             filter_menu = QMenu("Filter", self)
             less_than = filter_menu.addAction("Less than")
             less_than_equal = filter_menu.addAction("Less than or equal to")
             equal_to = filter_menu.addAction("Equal to")
             greater_than = filter_menu.addAction("Greater than")
             greater_than_equal = filter_menu.addAction("Greater than or equal to")
+        elif dtype in [pl.Date, pl.Datetime]:
+            filter_menu = QMenu("Filter", self)
+            equal_to = filter_menu.addAction("Equal to")
+            between = filter_menu.addAction("Between...")
         elif dtype in [pl.Utf8, pl.Categorical]:
             filter_menu = QMenu("Filter", self)
             contains = filter_menu.addAction("Contains")
@@ -257,6 +286,8 @@ class MainWindow(QMainWindow):
         elif action == stats_col:
             stats = get_column_statistics(self.model._data, column_name)
             QMessageBox.information(self, f"Statistics for {column_name}", stats)
+        elif action == convert_type:
+            self.handle_convert_type(column_name)
         elif action == less_than:
             self.handle_filter(column_name, "<")
         elif action == less_than_equal:
@@ -267,6 +298,8 @@ class MainWindow(QMainWindow):
             self.handle_filter(column_name, ">")
         elif action == greater_than_equal:
             self.handle_filter(column_name, ">=")
+        elif action == between:
+            self.handle_filter(column_name, "between")
         elif action == contains:
             self.handle_filter(column_name, "contains")
         elif action == starts_with:
@@ -282,6 +315,52 @@ class MainWindow(QMainWindow):
 
         apply_filter(self, column_name, filter_type)
         self.update_page_info()
+
+    def handle_convert_type(self, column_name):
+        if not self.is_model_loaded():
+            return
+
+        type_options = [
+            "String",
+            "Integer",
+            "Float",
+            "Boolean",
+            "Date",
+            "Datetime"
+        ]
+        new_type, ok = QInputDialog.getItem(
+            self,
+            "Convert Column Type",
+            f"Convert '{column_name}' to:",
+            type_options,
+            0,
+            False
+        )
+        if not ok:
+            return
+
+        type_map = {
+            "String": pl.Utf8,
+            "Integer": pl.Int64,
+            "Float": pl.Float64,
+            "Boolean": pl.Boolean,
+            "Date": pl.Date,
+            "Datetime": pl.Datetime
+        }
+
+        try:
+            target_type = type_map[new_type]
+            converted_df = self.model._data.with_columns(
+                pl.col(column_name).cast(target_type).alias(column_name)
+            )
+            self.model.update_data(converted_df)
+            self.update_statistics()
+        except Exception as e:
+            QMessageBox.warning(
+                self,
+                "Conversion Error",
+                f"Could not convert '{column_name}' to {new_type}: {e}"
+            )
 
     def generate_statistics(self):
         if not self.is_model_loaded():
@@ -340,6 +419,16 @@ class MainWindow(QMainWindow):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             column_name, dtype, default_value = dialog.get_data()
             try:
+                if not column_name:
+                    QMessageBox.warning(self, "Invalid Column Name", "Column name cannot be empty.")
+                    return
+                if column_name in self.model._data.columns:
+                    QMessageBox.warning(
+                        self,
+                        "Duplicate Column",
+                        f"A column named '{column_name}' already exists."
+                    )
+                    return
                 new_df = add_column(self.model._data, column_name, dtype, default_value)  # Pass DataFrame
                 self.model.update_data(new_df)  # Update the model with the new DataFrame
                 self.update_statistics()

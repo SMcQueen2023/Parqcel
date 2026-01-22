@@ -5,7 +5,6 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import QDate, QDateTime
 import datetime
 import polars as pl
-from logic.stats import get_page_data
 
 def apply_filter(self, column_name, filter_type):
     # Determine column data type first
@@ -35,7 +34,53 @@ def apply_filter(self, column_name, filter_type):
         prompt_text = f"Filter {column_name} with {filter_type}:"
 
     # Ask the user for a filter value
-    if column_dtype == pl.Date:
+    if column_dtype == pl.Date and filter_type == "between":
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Select Date Range")
+        layout = QVBoxLayout(dialog)
+        start_date_edit = QDateEdit()
+        start_date_edit.setCalendarPopup(True)
+        start_date_edit.setDate(QDate.currentDate())
+        end_date_edit = QDateEdit()
+        end_date_edit.setCalendarPopup(True)
+        end_date_edit.setDate(QDate.currentDate())
+        layout.addWidget(start_date_edit)
+        layout.addWidget(end_date_edit)
+        ok_button = QPushButton("OK")
+        ok_button.clicked.connect(dialog.accept)
+        layout.addWidget(ok_button)
+        if dialog.exec():
+            start_date = start_date_edit.date()
+            end_date = end_date_edit.date()
+            filter_value = (
+                datetime.date(start_date.year(), start_date.month(), start_date.day()),
+                datetime.date(end_date.year(), end_date.month(), end_date.day())
+            )
+        else:
+            return
+    elif column_dtype == pl.Datetime and filter_type == "between":
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Select DateTime Range")
+        layout = QVBoxLayout(dialog)
+        start_datetime_edit = QDateTimeEdit()
+        start_datetime_edit.setCalendarPopup(True)
+        start_datetime_edit.setDateTime(QDateTime.currentDateTime())
+        end_datetime_edit = QDateTimeEdit()
+        end_datetime_edit.setCalendarPopup(True)
+        end_datetime_edit.setDateTime(QDateTime.currentDateTime())
+        layout.addWidget(start_datetime_edit)
+        layout.addWidget(end_datetime_edit)
+        ok_button = QPushButton("OK")
+        ok_button.clicked.connect(dialog.accept)
+        layout.addWidget(ok_button)
+        if dialog.exec():
+            filter_value = (
+                start_datetime_edit.dateTime().toPyDateTime(),
+                end_datetime_edit.dateTime().toPyDateTime()
+            )
+        else:
+            return
+    elif column_dtype == pl.Date:
         dialog = QDialog(self)
         dialog.setWindowTitle("Select Date")
         layout = QVBoxLayout(dialog)
@@ -77,8 +122,6 @@ def apply_filter(self, column_name, filter_type):
         if not ok or not filter_value:
             return
 
-    self.model.save_state()  # Save current state for undo
-
     # Parse filter_value based on column dtype
     try:
         if column_dtype in [pl.Float32, pl.Float64,
@@ -95,7 +138,14 @@ def apply_filter(self, column_name, filter_type):
             else:
                 raise ValueError("Boolean value must be true or false")
         elif column_dtype in [pl.Date, pl.Datetime]:
-            if not isinstance(filter_value, (datetime.date, datetime.datetime)):
+            if filter_type == "between":
+                if (
+                    not isinstance(filter_value, tuple)
+                    or len(filter_value) != 2
+                    or not all(isinstance(v, (datetime.date, datetime.datetime)) for v in filter_value)
+                ):
+                    raise ValueError("Filter value must be a valid date/datetime range.")
+            elif not isinstance(filter_value, (datetime.date, datetime.datetime)):
                 raise ValueError("Filter value must be a valid date/datetime.")
         elif column_dtype in [pl.Utf8, pl.Categorical]:
             pass  # keep as string
@@ -108,31 +158,33 @@ def apply_filter(self, column_name, filter_type):
     # Apply the actual filter
     try:
         col = pl.col(column_name)
+        df = self.model._data
         if filter_type == "contains":
-            self.model._data = self.model._data.filter(col.str.contains(filter_value))
+            filtered_df = df.filter(col.str.contains(filter_value))
         elif filter_type == "starts_with":
-            self.model._data = self.model._data.filter(col.str.starts_with(filter_value))
+            filtered_df = df.filter(col.str.starts_with(filter_value))
         elif filter_type == "ends_with":
-            self.model._data = self.model._data.filter(col.str.ends_with(filter_value))
+            filtered_df = df.filter(col.str.ends_with(filter_value))
         elif filter_type == "==":
-            self.model._data = self.model._data.filter(col == filter_value)
+            filtered_df = df.filter(col == filter_value)
+        elif filter_type == "between":
+            start_value, end_value = filter_value
+            if start_value > end_value:
+                start_value, end_value = end_value, start_value
+            filtered_df = df.filter(col >= start_value).filter(col <= end_value)
         elif filter_type == "<":
-            self.model._data = self.model._data.filter(col < filter_value)
+            filtered_df = df.filter(col < filter_value)
         elif filter_type == "<=":
-            self.model._data = self.model._data.filter(col <= filter_value)
+            filtered_df = df.filter(col <= filter_value)
         elif filter_type == ">":
-            self.model._data = self.model._data.filter(col > filter_value)
+            filtered_df = df.filter(col > filter_value)
         elif filter_type == ">=":
-            self.model._data = self.model._data.filter(col >= filter_value)
+            filtered_df = df.filter(col >= filter_value)
+        else:
+            raise ValueError(f"Unsupported filter operation: {filter_type}")
     except Exception as e:
         QMessageBox.warning(self, "Filter Error", f"Error applying filter: {str(e)}")
         return
 
-    # Refresh table view
-    self.model._current_data = get_page_data(
-        self.model._data,
-        self.model.get_current_page(),
-        self.model.chunk_size
-    )
-    self.model.layoutChanged.emit()
+    self.model.update_data(filtered_df)
     self.update_page_info()
