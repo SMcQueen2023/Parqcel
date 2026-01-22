@@ -1,5 +1,5 @@
 from PyQt6.QtWidgets import (
-    QInputDialog, QMessageBox, QDialog, QVBoxLayout,
+    QInputDialog, QMessageBox, QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QDateEdit, QDateTimeEdit
 )
 from PyQt6.QtCore import QDate, QDateTime
@@ -34,7 +34,67 @@ def apply_filter(self, column_name, filter_type):
         prompt_text = f"Filter {column_name} with {filter_type}:"
 
     # Ask the user for a filter value
-    if column_dtype == pl.Date:
+    if column_dtype == pl.Date and filter_type == "between":
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Select Date Range")
+        layout = QVBoxLayout(dialog)
+        start_layout = QHBoxLayout()
+        start_layout.addWidget(QLabel("Start date:"))
+        start_date_edit = QDateEdit()
+        start_date_edit.setCalendarPopup(True)
+        start_date_edit.setDate(QDate.currentDate())
+        start_layout.addWidget(start_date_edit)
+        layout.addLayout(start_layout)
+
+        end_layout = QHBoxLayout()
+        end_layout.addWidget(QLabel("End date:"))
+        end_date_edit = QDateEdit()
+        end_date_edit.setCalendarPopup(True)
+        end_date_edit.setDate(QDate.currentDate())
+        end_layout.addWidget(end_date_edit)
+        layout.addLayout(end_layout)
+        ok_button = QPushButton("OK")
+        ok_button.clicked.connect(dialog.accept)
+        layout.addWidget(ok_button)
+        if dialog.exec():
+            start_date = start_date_edit.date()
+            end_date = end_date_edit.date()
+            filter_value = (
+                datetime.date(start_date.year(), start_date.month(), start_date.day()),
+                datetime.date(end_date.year(), end_date.month(), end_date.day())
+            )
+        else:
+            return
+    elif column_dtype == pl.Datetime and filter_type == "between":
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Select DateTime Range")
+        layout = QVBoxLayout(dialog)
+        start_layout = QHBoxLayout()
+        start_layout.addWidget(QLabel("Start datetime:"))
+        start_datetime_edit = QDateTimeEdit()
+        start_datetime_edit.setCalendarPopup(True)
+        start_datetime_edit.setDateTime(QDateTime.currentDateTime())
+        start_layout.addWidget(start_datetime_edit)
+        layout.addLayout(start_layout)
+
+        end_layout = QHBoxLayout()
+        end_layout.addWidget(QLabel("End datetime:"))
+        end_datetime_edit = QDateTimeEdit()
+        end_datetime_edit.setCalendarPopup(True)
+        end_datetime_edit.setDateTime(QDateTime.currentDateTime())
+        end_layout.addWidget(end_datetime_edit)
+        layout.addLayout(end_layout)
+        ok_button = QPushButton("OK")
+        ok_button.clicked.connect(dialog.accept)
+        layout.addWidget(ok_button)
+        if dialog.exec():
+            filter_value = (
+                start_datetime_edit.dateTime().toPyDateTime(),
+                end_datetime_edit.dateTime().toPyDateTime()
+            )
+        else:
+            return
+    elif column_dtype == pl.Date:
         dialog = QDialog(self)
         dialog.setWindowTitle("Select Date")
         layout = QVBoxLayout(dialog)
@@ -92,7 +152,14 @@ def apply_filter(self, column_name, filter_type):
             else:
                 raise ValueError("Boolean value must be true or false")
         elif column_dtype in [pl.Date, pl.Datetime]:
-            if not isinstance(filter_value, (datetime.date, datetime.datetime)):
+            if filter_type == "between":
+                if (
+                    not isinstance(filter_value, tuple)
+                    or len(filter_value) != 2
+                    or not all(isinstance(v, (datetime.date, datetime.datetime)) for v in filter_value)
+                ):
+                    raise ValueError("Filter value must be a valid date/datetime range.")
+            elif not isinstance(filter_value, (datetime.date, datetime.datetime)):
                 raise ValueError("Filter value must be a valid date/datetime.")
         elif column_dtype in [pl.Utf8, pl.Categorical]:
             pass  # keep as string
@@ -114,6 +181,11 @@ def apply_filter(self, column_name, filter_type):
             filtered_df = df.filter(col.str.ends_with(filter_value))
         elif filter_type == "==":
             filtered_df = df.filter(col == filter_value)
+        elif filter_type == "between":
+            start_value, end_value = filter_value
+            if start_value > end_value:
+                start_value, end_value = end_value, start_value
+            filtered_df = df.filter(col >= start_value).filter(col <= end_value)
         elif filter_type == "<":
             filtered_df = df.filter(col < filter_value)
         elif filter_type == "<=":
