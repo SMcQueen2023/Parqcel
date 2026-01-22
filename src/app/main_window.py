@@ -25,6 +25,8 @@ from logic.stats import (
     get_column_statistics,
     get_column_type_counts_string
 )
+import logging
+logger = logging.getLogger(__name__)
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -578,7 +580,7 @@ class MainWindow(QMainWindow):
                             converted_df = self.model._data.with_columns(new_col)
 
                 elapsed = time.perf_counter() - start
-                print(f"Conversion of column '{column_name}' to {new_type} took {elapsed:.2f}s")
+                logger.info("Conversion of column '%s' to %s took %.2fs", column_name, new_type, elapsed)
             else:
                 converted_df = self.model._data.with_columns(
                     column_expr.cast(target_type).alias(column_name)
@@ -675,15 +677,15 @@ class MainWindow(QMainWindow):
         print("MultiSortDialog exec result:", result)
 
         if result == QDialog.DialogCode.Accepted:
-            print("Dialog accepted.")
+            logger.debug("MultiSortDialog accepted")
             criteria = dialog.get_sorting_criteria()  # List of (column_name, ascending_bool) tuples
-            print("Sorting criteria received:", criteria)
+            logger.debug("Sorting criteria received: %s", criteria)
 
             if criteria:
                 columns, directions = zip(*criteria)  # unzip into two lists
-                print(f"Sorting columns: {columns} with directions: {directions}")
+                logger.info("Sorting columns: %s with directions: %s", columns, directions)
                 self.model.sort_multiple_columns(list(columns), list(directions))
             else:
-                print("No sort criteria provided.")
+                logger.debug("No sort criteria provided.")
         else:
-            print("Dialog canceled or closed without accepting.")
+            logger.debug("MultiSortDialog canceled or closed")

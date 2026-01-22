@@ -1,0 +1,42 @@
+[tool.black]
+line-length = 88
+target-version = ['py311']
+include = '\.pyi?$'
+exclude = '''
+/(\
+  \.eggs
+| \.git
+| \.hg
+| \.mypy_cache
+| \.tox
+| \.venv
+| build
+| dist
+)/
+'''
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+exclude = ["src/__pycache__", "tests/__pycache__"]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "parqcel"
+version = "0.1.0"
+description = "Parqcel: fast Parquet viewer/editor using PyQt6 and Polars"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "polars==1.28.1",
+  "PyQt6==6.9.0"
+]
+
+[project.scripts]
+parqcel = "main:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
