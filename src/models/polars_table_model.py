@@ -170,6 +170,7 @@ class PolarsTableModel(QAbstractTableModel):
             self._redo_stack.append(self._data.clone())
             self._data = self._undo_stack.pop()
             self._current_data = get_page_data(self._data, self._current_page, self.chunk_size)
+            self._column_types = get_column_types(self._data)
             self.layoutChanged.emit()
 
     def redo(self):
@@ -177,6 +178,7 @@ class PolarsTableModel(QAbstractTableModel):
             self._undo_stack.append(self._data.clone())
             self._data = self._redo_stack.pop()
             self._current_data = get_page_data(self._data, self._current_page, self.chunk_size)
+            self._column_types = get_column_types(self._data)
             self.layoutChanged.emit()
 
     def update_data(self, new_df: pl.DataFrame):

@@ -1,13 +1,16 @@
 from PyQt6.QtWidgets import (
     QMainWindow, QFileDialog, QTableView, QVBoxLayout, QWidget, QMenuBar,
     QPushButton, QHBoxLayout, QLineEdit, QLabel, QMenu, QMessageBox, QInputDialog,
-    QDialog, QTextEdit
+    QDialog, QTextEdit, QSizePolicy
 )
-from PyQt6.QtGui import QAction
+from PyQt6.QtGui import QAction, QFont
 from PyQt6.QtCore import QAbstractTableModel, Qt, QPoint
 import polars as pl
 import os
+import datetime
+import time
 from logic.filters import apply_filter  # Import logic to apply filters to dataframe
+from logic.date_formats import DATE_FORMATS, DATETIME_FORMATS
 from models.polars_table_model import PolarsTableModel  # Import the model class
 from app.widgets.edit_menu_gui import AddColumnDialog, MultiSortDialog, SortRuleWidget
 from app.edit_menu_controller import add_column
@@ -40,8 +43,8 @@ class MainWindow(QMainWindow):
         # Button Layout for pagination and actions
         self.pagination_layout = QHBoxLayout()
         self.first_button = QPushButton("⏮")
-        self.prev_button = QPushButton("◀")
-        self.next_button = QPushButton("▶")
+        self.prev_button = QPushButton("⏪")
+        self.next_button = QPushButton("⏩")
         self.last_button = QPushButton("⏭")
         self.page_input = QLineEdit()
         self.page_input.setPlaceholderText("Jump to page")
@@ -65,12 +68,55 @@ class MainWindow(QMainWindow):
         self.stats_layout.addWidget(self.total_column_count_label)
         self.stats_layout.addWidget(self.column_type_count_label)
 
+        # Improve pagination button appearance
+        pagination_font = QFont()
+        pagination_font.setPointSize(14)
+        pagination_font.setBold(True)
+        pagination_buttons = [
+            self.first_button,
+            self.prev_button,
+            self.next_button,
+            self.last_button
+        ]
+        for button in pagination_buttons:
+            button.setFont(pagination_font)
+            button.setFixedSize(36, 32)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            # Modern plain white icon on transparent background
+            button.setStyleSheet(
+                "QPushButton {"
+                "  color: #FFFFFF;"
+                "  background-color: transparent;"
+                "  border: none;"
+                "  border-radius: 6px;"
+                "  padding: 2px;"
+                "}"
+                "QPushButton:hover {"
+                "  background-color: rgba(255,255,255,0.03);"
+                "}"
+                "QPushButton:pressed {"
+                "  background-color: rgba(255,255,255,0.06);"
+                "}"
+            )
+
         # Set button styles
         self.pagination_layout.addWidget(self.first_button)
         self.pagination_layout.addWidget(self.prev_button)
         self.pagination_layout.addWidget(self.next_button)
         self.pagination_layout.addWidget(self.last_button)
         self.pagination_layout.addWidget(self.page_input)
+
+        # Cap Jump/Undo/Redo sizes to avoid stretching on large windows
+        self.jump_button.setFixedWidth(80)
+        self.jump_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.undo_button.setFixedWidth(80)
+        self.undo_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.redo_button.setFixedWidth(80)
+        self.redo_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+
+        # Page info label should expand to absorb available space so buttons don't stretch
+        self.page_info_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+
         self.pagination_layout.addWidget(self.jump_button)
         self.pagination_layout.addWidget(self.page_info_label)
         self.pagination_layout.addWidget(self.undo_button)
@@ -260,7 +306,11 @@ class MainWindow(QMainWindow):
             greater_than_equal = filter_menu.addAction("Greater than or equal to")
         elif dtype in [pl.Date, pl.Datetime]:
             filter_menu = QMenu("Filter", self)
+            less_than = filter_menu.addAction("Less than")
+            less_than_equal = filter_menu.addAction("Less than or equal to")
             equal_to = filter_menu.addAction("Equal to")
+            greater_than = filter_menu.addAction("Greater than")
+            greater_than_equal = filter_menu.addAction("Greater than or equal to")
             between = filter_menu.addAction("Between...")
         elif dtype in [pl.Utf8, pl.Categorical]:
             filter_menu = QMenu("Filter", self)
@@ -350,9 +400,189 @@ class MainWindow(QMainWindow):
 
         try:
             target_type = type_map[new_type]
-            converted_df = self.model._data.with_columns(
-                pl.col(column_name).cast(target_type).alias(column_name)
-            )
+            column_expr = pl.col(column_name)
+            # If converting from string to date/datetime, do Python-side parsing
+            if new_type in ["Date", "Datetime"] and self.model._data.schema[column_name] == pl.Utf8:
+                def _parse_date(value):
+                    if value is None:
+                        return None
+                    if isinstance(value, datetime.date) and not isinstance(value, datetime.datetime):
+                        return value
+                    if isinstance(value, datetime.datetime):
+                        return value.date()
+                    text = str(value).strip()
+                    if not text:
+                        return None
+                    for fmt in DATE_FORMATS:
+                        try:
+                            return datetime.datetime.strptime(text, fmt).date()
+                        except ValueError:
+                            continue
+                    return None
+
+                def _parse_datetime(value):
+                    if value is None:
+                        return None
+                    if isinstance(value, datetime.datetime):
+                        return value
+                    if isinstance(value, datetime.date):
+                        return datetime.datetime.combine(value, datetime.time())
+                    text = str(value).strip()
+                    if not text:
+                        return None
+                    # Try datetime formats first, then fall back to date formats (converted to datetime)
+                    for fmt in DATETIME_FORMATS:
+                        try:
+                            return datetime.datetime.strptime(text, fmt)
+                        except ValueError:
+                            continue
+                    # fallback: try date-only formats and convert to a datetime at midnight
+                    for fmt in DATE_FORMATS:
+                        try:
+                            d = datetime.datetime.strptime(text, fmt).date()
+                            return datetime.datetime.combine(d, datetime.time())
+                        except ValueError:
+                            continue
+                    return None
+
+                # Strategy: detect dominant format on a small sample and perform a
+                # single vectorized Polars parse for that format (fast). If nulls
+                # remain, perform a Python-only fallback for those rows. Also
+                # attempt date-only detection and cast to datetime. Avoid using
+                # two-digit-year formats (%y) in vectorized attempts which can
+                # cause Polars strptime issues.
+
+                def detect_format_for_samples(values, formats, sample_size=500):
+                    samples = []
+                    for v in values:
+                        if v is None:
+                            continue
+                        s = str(v).strip()
+                        if s:
+                            samples.append(s)
+                        if len(samples) >= sample_size:
+                            break
+                    if not samples:
+                        return None
+                    for fmt in formats:
+                        ok = True
+                        for s in samples:
+                            try:
+                                datetime.datetime.strptime(s, fmt)
+                            except Exception:
+                                ok = False
+                                break
+                        if ok:
+                            return fmt
+                    return None
+
+                vals = self.model._data[column_name].to_list()
+                start = time.perf_counter()
+
+                # 1) Attempt to detect a datetime format and parse vectorized
+                best_dt_fmt = detect_format_for_samples(vals, DATETIME_FORMATS)
+                if best_dt_fmt:
+                    try:
+                        converted_df_temp = self.model._data.with_columns(
+                            pl.col(column_name).str.strptime(pl.Datetime, best_dt_fmt, strict=False).alias(column_name)
+                        )
+                    except Exception:
+                        converted_df_temp = None
+
+                    if converted_df_temp is not None:
+                        parsed_series = converted_df_temp[column_name]
+                        null_count = int(parsed_series.is_null().sum())
+                        if null_count == 0:
+                            converted_df = converted_df_temp
+                        else:
+                            parsed_vals = parsed_series.to_list()
+                            orig_vals = self.model._data[column_name].to_list()
+                            for i, v in enumerate(parsed_vals):
+                                if v is None:
+                                    parsed_vals[i] = _parse_datetime(orig_vals[i])
+                            try:
+                                new_col = pl.Series(name=column_name, values=parsed_vals).cast(pl.Datetime)
+                            except Exception:
+                                new_col = pl.Series(name=column_name, values=parsed_vals)
+                            converted_df = self.model._data.with_columns(new_col)
+                    else:
+                        parsed = [_parse_datetime(v) for v in vals]
+                        try:
+                            new_col = pl.Series(name=column_name, values=parsed).cast(pl.Datetime)
+                        except Exception:
+                            new_col = pl.Series(name=column_name, values=parsed)
+                        converted_df = self.model._data.with_columns(new_col)
+                else:
+                    # 2) Attempt date-only detection and cast to datetime
+                    best_date_fmt = detect_format_for_samples(vals, DATE_FORMATS)
+                    if best_date_fmt:
+                        try:
+                            converted_df_temp = self.model._data.with_columns(
+                                pl.col(column_name).str.strptime(pl.Date, best_date_fmt, strict=False).alias(column_name)
+                            )
+                            converted_df_temp = converted_df_temp.with_columns(pl.col(column_name).cast(pl.Datetime).alias(column_name))
+                        except Exception:
+                            converted_df_temp = None
+
+                        if converted_df_temp is not None:
+                            parsed_series = converted_df_temp[column_name]
+                            null_count = int(parsed_series.is_null().sum())
+                            if null_count == 0:
+                                converted_df = converted_df_temp
+                            else:
+                                parsed_vals = parsed_series.to_list()
+                                orig_vals = self.model._data[column_name].to_list()
+                                for i, v in enumerate(parsed_vals):
+                                    if v is None:
+                                        parsed_vals[i] = _parse_datetime(orig_vals[i])
+                                try:
+                                    new_col = pl.Series(name=column_name, values=parsed_vals).cast(pl.Datetime)
+                                except Exception:
+                                    new_col = pl.Series(name=column_name, values=parsed_vals)
+                                converted_df = self.model._data.with_columns(new_col)
+                        else:
+                            parsed = [_parse_datetime(v) for v in vals]
+                            try:
+                                new_col = pl.Series(name=column_name, values=parsed).cast(pl.Datetime)
+                            except Exception:
+                                new_col = pl.Series(name=column_name, values=parsed)
+                            converted_df = self.model._data.with_columns(new_col)
+                    else:
+                        # 3) Try coalescing several safe datetime formats (exclude %y)
+                        polars_dt_formats = [f for f in DATETIME_FORMATS if "%y" not in f]
+                        parsed_exprs = [pl.col(column_name).str.strptime(pl.Datetime, fmt, strict=False) for fmt in polars_dt_formats]
+                        if parsed_exprs:
+                            combined = pl.coalesce(parsed_exprs)
+                            converted_df_temp = self.model._data.with_columns(combined.alias(column_name))
+                            parsed_series = converted_df_temp[column_name]
+                            null_count = int(parsed_series.is_null().sum())
+                            if null_count == 0:
+                                converted_df = converted_df_temp
+                            else:
+                                parsed_vals = parsed_series.to_list()
+                                orig_vals = self.model._data[column_name].to_list()
+                                for i, v in enumerate(parsed_vals):
+                                    if v is None:
+                                        parsed_vals[i] = _parse_datetime(orig_vals[i])
+                                try:
+                                    new_col = pl.Series(name=column_name, values=parsed_vals).cast(pl.Datetime)
+                                except Exception:
+                                    new_col = pl.Series(name=column_name, values=parsed_vals)
+                                converted_df = self.model._data.with_columns(new_col)
+                        else:
+                            parsed = [_parse_datetime(v) for v in vals]
+                            try:
+                                new_col = pl.Series(name=column_name, values=parsed).cast(pl.Datetime)
+                            except Exception:
+                                new_col = pl.Series(name=column_name, values=parsed)
+                            converted_df = self.model._data.with_columns(new_col)
+
+                elapsed = time.perf_counter() - start
+                print(f"Conversion of column '{column_name}' to {new_type} took {elapsed:.2f}s")
+            else:
+                converted_df = self.model._data.with_columns(
+                    column_expr.cast(target_type).alias(column_name)
+                )
             self.model.update_data(converted_df)
             self.update_statistics()
         except Exception as e:
