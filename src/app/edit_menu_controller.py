@@ -1,6 +1,9 @@
 import polars as pl
 
-def add_column(df: pl.DataFrame, col_name: str, dtype: str, default_value) -> pl.DataFrame:
+
+def add_column(
+    df: pl.DataFrame, col_name: str, dtype: str, default_value
+) -> pl.DataFrame:
     if not col_name:
         raise ValueError("Column name cannot be empty.")
 
@@ -10,16 +13,26 @@ def add_column(df: pl.DataFrame, col_name: str, dtype: str, default_value) -> pl
     try:
         if dtype == "Integer":
             default_value = int(default_value)
-            new_col = pl.Series(name=col_name, values=[default_value] * df.height, dtype=pl.Int64)
+            new_col = pl.Series(
+                name=col_name, values=[default_value] * df.height, dtype=pl.Int64
+            )
         elif dtype == "Float":
             default_value = float(default_value)
-            new_col = pl.Series(name=col_name, values=[default_value] * df.height, dtype=pl.Float64)
+            new_col = pl.Series(
+                name=col_name, values=[default_value] * df.height, dtype=pl.Float64
+            )
         elif dtype == "Date":
-            new_col = pl.Series(name=col_name, values=[default_value] * df.height).cast(pl.Date)
+            new_col = pl.Series(name=col_name, values=[default_value] * df.height).cast(
+                pl.Date
+            )
         elif dtype == "Datetime":
-            new_col = pl.Series(name=col_name, values=[default_value] * df.height).cast(pl.Datetime)
+            new_col = pl.Series(name=col_name, values=[default_value] * df.height).cast(
+                pl.Datetime
+            )
         else:  # String
-            new_col = pl.Series(name=col_name, values=[default_value] * df.height, dtype=pl.Utf8)
+            new_col = pl.Series(
+                name=col_name, values=[default_value] * df.height, dtype=pl.Utf8
+            )
 
         df = df.with_columns(new_col)
         return df

@@ -1,7 +1,20 @@
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QComboBox,
-    QStackedWidget, QSpinBox, QDoubleSpinBox, QDateEdit, QDateTimeEdit,
-    QPushButton, QWidget, QListWidgetItem, QListWidget, QMessageBox
+    QDialog,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QComboBox,
+    QStackedWidget,
+    QSpinBox,
+    QDoubleSpinBox,
+    QDateEdit,
+    QDateTimeEdit,
+    QPushButton,
+    QWidget,
+    QListWidgetItem,
+    QListWidget,
+    QMessageBox,
 )
 from PyQt6.QtCore import QDate, QDateTime
 
@@ -88,6 +101,7 @@ class AddColumnDialog(QDialog):
             value = None
         return name, dtype, value
 
+
 class MultiSortDialog(QDialog):
     def __init__(self, column_names, parent=None):
         super().__init__(parent)
@@ -134,7 +148,7 @@ class MultiSortDialog(QDialog):
         button_layout.addWidget(ok_button)
         button_layout.addWidget(cancel_button)
         self.layout.addLayout(button_layout)
-    
+
     def add_sort_rule(self):
         column = self.column_selector.currentText()
 
@@ -152,7 +166,7 @@ class MultiSortDialog(QDialog):
         self.sort_list_widget.addItem(item)
         self.sort_list_widget.setItemWidget(item, widget)
         item.setSizeHint(widget.sizeHint())
-    
+
     def get_sorting_criteria(self):
         criteria = []
         for i in range(self.sort_list_widget.count()):
@@ -167,9 +181,12 @@ class MultiSortDialog(QDialog):
     def accept(self):
         criteria = self.get_sorting_criteria()
         if not criteria:
-            QMessageBox.warning(self, "No Sort Criteria", "Please add at least one sort rule.")
+            QMessageBox.warning(
+                self, "No Sort Criteria", "Please add at least one sort rule."
+            )
             return
         super().accept()
+
 
 class SortRuleWidget(QWidget):
     def __init__(self, column_name, order="Ascending", parent=None):
