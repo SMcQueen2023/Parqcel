@@ -2,6 +2,7 @@
 
 These functions are pure and small so they can be unit-tested without GUI.
 """
+
 from __future__ import annotations
 
 from typing import Iterable, List, Optional, Any
@@ -10,7 +11,9 @@ import datetime
 from .date_formats import DATE_FORMATS, DATETIME_FORMATS
 
 
-def detect_format_for_samples(values: Iterable[Any], formats: Iterable[str], sample_size: int = 500) -> Optional[str]:
+def detect_format_for_samples(
+    values: Iterable[Any], formats: Iterable[str], sample_size: int = 500
+) -> Optional[str]:
     """Try to detect a format from a small sample of string values.
 
     Returns the first format that successfully parses all sampled non-empty strings, or None.

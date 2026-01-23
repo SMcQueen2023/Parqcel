@@ -3,6 +3,7 @@
 Provides a small helper to configure the standard library `logging` module
 from `config.toml` or the `PARQCEL_LOG_LEVEL` environment variable.
 """
+
 from __future__ import annotations
 
 import logging
@@ -15,6 +16,7 @@ from typing import Optional
 tomllib: Optional[ModuleType] = None
 try:
     import tomllib as _tomllib  # type: ignore
+
     tomllib = _tomllib
 except Exception:  # pragma: no cover - tomllib available on py3.11
     tomllib = None

@@ -25,7 +25,13 @@ def test_filter_equals_and_between_numeric():
 
 
 def test_filter_between_dates():
-    dates = [datetime.date(2024, 1, 1), datetime.date(2024, 2, 1), datetime.date(2024, 3, 1)]
+    dates = [
+        datetime.date(2024, 1, 1),
+        datetime.date(2024, 2, 1),
+        datetime.date(2024, 3, 1),
+    ]
     df = pl.DataFrame({"d": dates}).with_columns(pl.col("d").cast(pl.Date))
-    out = apply_filter_to_df(df, "d", "between", (datetime.date(2024, 1, 15), datetime.date(2024, 3, 1)))
+    out = apply_filter_to_df(
+        df, "d", "between", (datetime.date(2024, 1, 15), datetime.date(2024, 3, 1))
+    )
     assert out.height == 2

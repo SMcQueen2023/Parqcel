@@ -1,11 +1,19 @@
 from PyQt6.QtWidgets import (
-    QInputDialog, QMessageBox, QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QDateEdit, QDateTimeEdit
+    QInputDialog,
+    QMessageBox,
+    QDialog,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QDateEdit,
+    QDateTimeEdit,
 )
 from PyQt6.QtCore import QDate, QDateTime
 import datetime
 import polars as pl
 from .filtering import apply_filter_to_df
+
 
 def apply_filter(self, column_name, filter_type):
     # Determine column data type first
@@ -62,7 +70,7 @@ def apply_filter(self, column_name, filter_type):
             end_date = end_date_edit.date()
             filter_value = (
                 datetime.date(start_date.year(), start_date.month(), start_date.day()),
-                datetime.date(end_date.year(), end_date.month(), end_date.day())
+                datetime.date(end_date.year(), end_date.month(), end_date.day()),
             )
         else:
             return
@@ -91,7 +99,7 @@ def apply_filter(self, column_name, filter_type):
         if dialog.exec():
             filter_value = (
                 start_datetime_edit.dateTime().toPyDateTime(),
-                end_datetime_edit.dateTime().toPyDateTime()
+                end_datetime_edit.dateTime().toPyDateTime(),
             )
         else:
             return
@@ -139,9 +147,18 @@ def apply_filter(self, column_name, filter_type):
 
     # Parse filter_value based on column dtype
     try:
-        if column_dtype in [pl.Float32, pl.Float64,
-                            pl.Int8, pl.Int16, pl.Int32, pl.Int64,
-                            pl.UInt8, pl.UInt16, pl.UInt32, pl.UInt64]:
+        if column_dtype in [
+            pl.Float32,
+            pl.Float64,
+            pl.Int8,
+            pl.Int16,
+            pl.Int32,
+            pl.Int64,
+            pl.UInt8,
+            pl.UInt16,
+            pl.UInt32,
+            pl.UInt64,
+        ]:
             if filter_type in ["<", "<=", "==", ">", ">="]:
                 filter_value = float(filter_value)
         elif column_dtype == pl.Boolean:
@@ -157,9 +174,14 @@ def apply_filter(self, column_name, filter_type):
                 if (
                     not isinstance(filter_value, tuple)
                     or len(filter_value) != 2
-                    or not all(isinstance(v, (datetime.date, datetime.datetime)) for v in filter_value)
+                    or not all(
+                        isinstance(v, (datetime.date, datetime.datetime))
+                        for v in filter_value
+                    )
                 ):
-                    raise ValueError("Filter value must be a valid date/datetime range.")
+                    raise ValueError(
+                        "Filter value must be a valid date/datetime range."
+                    )
             elif not isinstance(filter_value, (datetime.date, datetime.datetime)):
                 raise ValueError("Filter value must be a valid date/datetime.")
         elif column_dtype in [pl.Utf8, pl.Categorical]:

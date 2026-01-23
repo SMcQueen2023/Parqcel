@@ -11,7 +11,7 @@ from logic.stats import (
     get_page_data,
     calculate_max_pages,
     get_column_statistics,
-    get_column_type_counts_string
+    get_column_type_counts_string,
 )
 
 
