@@ -1,27 +1,24 @@
 from PyQt6.QtWidgets import (
-    QMainWindow, QFileDialog, QTableView, QVBoxLayout, QWidget, QMenuBar,
-    QPushButton, QHBoxLayout, QLineEdit, QLabel, QMenu, QMessageBox, QInputDialog,
+    QMainWindow, QFileDialog, QTableView, QVBoxLayout, QWidget, QPushButton, QHBoxLayout, QLineEdit, QLabel, QMenu, QMessageBox, QInputDialog,
     QDialog, QTextEdit, QSizePolicy
 )
 from PyQt6.QtGui import QAction, QFont
-from PyQt6.QtCore import QAbstractTableModel, Qt, QPoint
+from PyQt6.QtCore import Qt, QPoint
 import polars as pl
 import os
-import datetime
 import time
 from logic.filters import apply_filter  # Import logic to apply filters to dataframe
 from logic.date_formats import DATE_FORMATS, DATETIME_FORMATS
+from logic.parsers import (
+    detect_format_for_samples,
+    parse_single_datetime,
+    parse_list_of_datetimes,
+)
 from models.polars_table_model import PolarsTableModel  # Import the model class
-from app.widgets.edit_menu_gui import AddColumnDialog, MultiSortDialog, SortRuleWidget
+from app.widgets.edit_menu_gui import AddColumnDialog, MultiSortDialog
 from app.edit_menu_controller import add_column
 from logic.stats import (
-    get_numeric_stats,
-    get_string_stats,
     generate_statistics,
-    update_statistics,
-    get_column_types,
-    get_page_data,
-    calculate_max_pages,
     get_column_statistics,
     get_column_type_counts_string
 )
@@ -405,78 +402,9 @@ class MainWindow(QMainWindow):
             column_expr = pl.col(column_name)
             # If converting from string to date/datetime, do Python-side parsing
             if new_type in ["Date", "Datetime"] and self.model._data.schema[column_name] == pl.Utf8:
-                def _parse_date(value):
-                    if value is None:
-                        return None
-                    if isinstance(value, datetime.date) and not isinstance(value, datetime.datetime):
-                        return value
-                    if isinstance(value, datetime.datetime):
-                        return value.date()
-                    text = str(value).strip()
-                    if not text:
-                        return None
-                    for fmt in DATE_FORMATS:
-                        try:
-                            return datetime.datetime.strptime(text, fmt).date()
-                        except ValueError:
-                            continue
-                    return None
-
-                def _parse_datetime(value):
-                    if value is None:
-                        return None
-                    if isinstance(value, datetime.datetime):
-                        return value
-                    if isinstance(value, datetime.date):
-                        return datetime.datetime.combine(value, datetime.time())
-                    text = str(value).strip()
-                    if not text:
-                        return None
-                    # Try datetime formats first, then fall back to date formats (converted to datetime)
-                    for fmt in DATETIME_FORMATS:
-                        try:
-                            return datetime.datetime.strptime(text, fmt)
-                        except ValueError:
-                            continue
-                    # fallback: try date-only formats and convert to a datetime at midnight
-                    for fmt in DATE_FORMATS:
-                        try:
-                            d = datetime.datetime.strptime(text, fmt).date()
-                            return datetime.datetime.combine(d, datetime.time())
-                        except ValueError:
-                            continue
-                    return None
-
-                # Strategy: detect dominant format on a small sample and perform a
-                # single vectorized Polars parse for that format (fast). If nulls
-                # remain, perform a Python-only fallback for those rows. Also
-                # attempt date-only detection and cast to datetime. Avoid using
-                # two-digit-year formats (%y) in vectorized attempts which can
-                # cause Polars strptime issues.
-
-                def detect_format_for_samples(values, formats, sample_size=500):
-                    samples = []
-                    for v in values:
-                        if v is None:
-                            continue
-                        s = str(v).strip()
-                        if s:
-                            samples.append(s)
-                        if len(samples) >= sample_size:
-                            break
-                    if not samples:
-                        return None
-                    for fmt in formats:
-                        ok = True
-                        for s in samples:
-                            try:
-                                datetime.datetime.strptime(s, fmt)
-                            except Exception:
-                                ok = False
-                                break
-                        if ok:
-                            return fmt
-                    return None
+                # Use parser helpers from `logic.parsers` for single-value parsing
+                # and sample-based format detection. Vectorized parsing is still
+                # attempted first for performance; fallbacks use the helpers.
 
                 vals = self.model._data[column_name].to_list()
                 start = time.perf_counter()
@@ -501,14 +429,14 @@ class MainWindow(QMainWindow):
                             orig_vals = self.model._data[column_name].to_list()
                             for i, v in enumerate(parsed_vals):
                                 if v is None:
-                                    parsed_vals[i] = _parse_datetime(orig_vals[i])
+                                    parsed_vals[i] = parse_single_datetime(orig_vals[i])
                             try:
                                 new_col = pl.Series(name=column_name, values=parsed_vals).cast(pl.Datetime)
                             except Exception:
                                 new_col = pl.Series(name=column_name, values=parsed_vals)
                             converted_df = self.model._data.with_columns(new_col)
                     else:
-                        parsed = [_parse_datetime(v) for v in vals]
+                        parsed = parse_list_of_datetimes(vals)
                         try:
                             new_col = pl.Series(name=column_name, values=parsed).cast(pl.Datetime)
                         except Exception:
@@ -536,14 +464,14 @@ class MainWindow(QMainWindow):
                                 orig_vals = self.model._data[column_name].to_list()
                                 for i, v in enumerate(parsed_vals):
                                     if v is None:
-                                        parsed_vals[i] = _parse_datetime(orig_vals[i])
+                                        parsed_vals[i] = parse_single_datetime(orig_vals[i])
                                 try:
                                     new_col = pl.Series(name=column_name, values=parsed_vals).cast(pl.Datetime)
                                 except Exception:
                                     new_col = pl.Series(name=column_name, values=parsed_vals)
                                 converted_df = self.model._data.with_columns(new_col)
                         else:
-                            parsed = [_parse_datetime(v) for v in vals]
+                            parsed = parse_list_of_datetimes(vals)
                             try:
                                 new_col = pl.Series(name=column_name, values=parsed).cast(pl.Datetime)
                             except Exception:
@@ -565,14 +493,14 @@ class MainWindow(QMainWindow):
                                 orig_vals = self.model._data[column_name].to_list()
                                 for i, v in enumerate(parsed_vals):
                                     if v is None:
-                                        parsed_vals[i] = _parse_datetime(orig_vals[i])
+                                        parsed_vals[i] = parse_single_datetime(orig_vals[i])
                                 try:
                                     new_col = pl.Series(name=column_name, values=parsed_vals).cast(pl.Datetime)
                                 except Exception:
                                     new_col = pl.Series(name=column_name, values=parsed_vals)
                                 converted_df = self.model._data.with_columns(new_col)
                         else:
-                            parsed = [_parse_datetime(v) for v in vals]
+                            parsed = parse_list_of_datetimes(vals)
                             try:
                                 new_col = pl.Series(name=column_name, values=parsed).cast(pl.Datetime)
                             except Exception:

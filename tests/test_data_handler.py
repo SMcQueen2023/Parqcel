@@ -1,6 +1,4 @@
 import polars as pl
-import tempfile
-import os
 
 
 def test_parquet_roundtrip(tmp_path):

@@ -1,15 +1,14 @@
-from PyQt6.QtCore import QAbstractTableModel, Qt
+from __future__ import annotations
+
+from typing import List, Dict
+
+from PyQt6.QtCore import QAbstractTableModel, Qt, QModelIndex
 import polars as pl
 from logic.stats import (
-    get_numeric_stats,
-    get_string_stats,
-    generate_statistics,
-    update_statistics,
     get_column_types,
     get_page_data,
     calculate_max_pages,
-    get_column_statistics,
-    get_column_type_counts_string
+    get_column_statistics
 )
 from datetime import datetime, date
 import logging
@@ -17,25 +16,25 @@ import logging
 logger = logging.getLogger(__name__)
 
 class PolarsTableModel(QAbstractTableModel):
-    def __init__(self, data: pl.DataFrame, chunk_size=10000):
+    def __init__(self, data: pl.DataFrame, chunk_size: int = 10000) -> None:
         super().__init__()
-        self._data = data
-        self.chunk_size = chunk_size
-        self._current_page = 0
-        self._max_pages = calculate_max_pages(data.height, chunk_size)
-        self._current_data = get_page_data(data, self._current_page, chunk_size)
-        self._column_types = get_column_types(data)
-        self._undo_stack = []
-        self._redo_stack = []
+        self._data: pl.DataFrame = data
+        self.chunk_size: int = chunk_size
+        self._current_page: int = 0
+        self._max_pages: int = calculate_max_pages(data.height, chunk_size)
+        self._current_data: pl.DataFrame = get_page_data(data, self._current_page, chunk_size)
+        self._column_types: Dict[str, str] = get_column_types(data)
+        self._undo_stack: List[pl.DataFrame] = []
+        self._redo_stack: List[pl.DataFrame] = []
 
-    def save_state(self):
+    def save_state(self) -> None:
         self._undo_stack.append(self._data.clone())
         self._redo_stack.clear()
 
-    def rowCount(self, parent=None):
+    def rowCount(self, parent=None) -> int:
         return self._current_data.height
 
-    def columnCount(self, parent=None):
+    def columnCount(self, parent=None) -> int:
         return self._current_data.width
 
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
@@ -68,7 +67,7 @@ class PolarsTableModel(QAbstractTableModel):
             | Qt.ItemFlag.ItemIsEditable
         )
 
-    def setData(self, index, value, role):
+    def setData(self, index: QModelIndex, value: object, role: int = Qt.ItemDataRole.EditRole) -> bool:
         if role == Qt.ItemDataRole.EditRole:
             self.save_state()
 
@@ -79,9 +78,9 @@ class PolarsTableModel(QAbstractTableModel):
 
             try:
                 if dtype in [pl.Int64, pl.Int32]:
-                    value = int(value)
+                    value = int(str(value))
                 elif dtype in [pl.Float64, pl.Float32]:
-                    value = float(value)
+                    value = float(str(value))
                 elif dtype == pl.Date:
                     # Try parsing string to date
                     if isinstance(value, str):
@@ -117,41 +116,41 @@ class PolarsTableModel(QAbstractTableModel):
             return True
         return False
 
-    def load_next_page(self):
+    def load_next_page(self) -> None:
         if self._current_page < self._max_pages - 1:
             self._current_page += 1
             self._current_data = get_page_data(self._data, self._current_page, self.chunk_size)
             self.layoutChanged.emit()
 
-    def load_previous_page(self):
+    def load_previous_page(self) -> None:
         if self._current_page > 0:
             self._current_page -= 1
             self._current_data = get_page_data(self._data, self._current_page, self.chunk_size)
             self.layoutChanged.emit()
 
-    def jump_to_page(self, page_number):
+    def jump_to_page(self, page_number: int) -> None:
         if 0 <= page_number < self._max_pages:
             self._current_page = page_number
             self._current_data = get_page_data(self._data, self._current_page, self.chunk_size)
             self.layoutChanged.emit()
 
-    def get_current_page(self):
+    def get_current_page(self) -> int:
         return self._current_page
 
-    def get_max_pages(self):
+    def get_max_pages(self) -> int:
         return self._max_pages
 
-    def sort_column(self, column_name, ascending=True):
+    def sort_column(self, column_name: str, ascending: bool = True) -> None:
         self._data = self._data.sort(column_name, descending=not ascending)
         self._current_data = get_page_data(self._data, self._current_page, self.chunk_size)
         self.layoutChanged.emit()
 
-    def drop_column(self, column_name):
+    def drop_column(self, column_name: str) -> None:
         self._data = self._data.drop(column_name)
         self._current_data = get_page_data(self._data, self._current_page, self.chunk_size)
         self.layoutChanged.emit()
 
-    def add_column(self, column_name: str, default_value=None):
+    def add_column(self, column_name: str, default_value: object | None = None) -> None:
         if column_name in self._data.columns:
             return
 
@@ -165,10 +164,10 @@ class PolarsTableModel(QAbstractTableModel):
 
         self.layoutChanged.emit()
 
-    def get_column_statistics(self, column_name):
+    def get_column_statistics(self, column_name: str) -> str:
         return get_column_statistics(self._data, column_name)
 
-    def undo(self):
+    def undo(self) -> None:
         if self._undo_stack:
             self._redo_stack.append(self._data.clone())
             self._data = self._undo_stack.pop()
@@ -176,7 +175,7 @@ class PolarsTableModel(QAbstractTableModel):
             self._column_types = get_column_types(self._data)
             self.layoutChanged.emit()
 
-    def redo(self):
+    def redo(self) -> None:
         if self._redo_stack:
             self._undo_stack.append(self._data.clone())
             self._data = self._redo_stack.pop()
@@ -184,7 +183,7 @@ class PolarsTableModel(QAbstractTableModel):
             self._column_types = get_column_types(self._data)
             self.layoutChanged.emit()
 
-    def update_data(self, new_df: pl.DataFrame):
+    def update_data(self, new_df: pl.DataFrame) -> None:
         self.save_state()
         self._data = new_df
         self._max_pages = calculate_max_pages(new_df.height, self.chunk_size)
@@ -193,7 +192,7 @@ class PolarsTableModel(QAbstractTableModel):
         self._column_types = get_column_types(self._data)
         self.layoutChanged.emit()
 
-    def sort_multiple_columns(self, columns: list[str], directions: list[bool]):
+    def sort_multiple_columns(self, columns: list[str], directions: list[bool]) -> None:
         try:
             logger.info("Sorting data by columns: %s with directions: %s", columns, directions)
             sorted_df = self._data.sort(by=columns, descending=[not d for d in directions])
@@ -202,5 +201,14 @@ class PolarsTableModel(QAbstractTableModel):
         except Exception as e:
             logger.exception("Error sorting multiple columns: %s", e)
 
-    def get_column_names(self):
+    def get_column_names(self) -> list[str]:
         return list(self._data.columns)
+
+    # Safe accessors
+    def get_dataframe(self) -> pl.DataFrame:
+        """Return the underlying DataFrame (read-only intention)."""
+        return self._data
+
+    def replace_dataframe(self, new_df: pl.DataFrame) -> None:
+        """Replace the underlying DataFrame with a new one (keeps undo snapshot)."""
+        self.update_data(new_df)
