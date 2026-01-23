@@ -8,9 +8,14 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
+from types import ModuleType
+from typing import Optional
 
+# `tomllib` exists on Python 3.11+. Expose as an optional module to keep mypy happy.
+tomllib: Optional[ModuleType] = None
 try:
-    import tomllib
+    import tomllib as _tomllib  # type: ignore
+    tomllib = _tomllib
 except Exception:  # pragma: no cover - tomllib available on py3.11
     tomllib = None
 

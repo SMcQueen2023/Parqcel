@@ -1,7 +1,7 @@
 import polars as pl
-from typing import List
+from typing import List, Dict
 
-def _value_count_summary(series: pl.Series, max_items: int = 5) -> list[str]:
+def _value_count_summary(series: pl.Series, max_items: int = 5) -> List[str]:
     """
     Return top value counts and percentages for a series,
     dynamically detecting the counts column.
@@ -74,12 +74,17 @@ def get_string_stats(series: pl.Series) -> List[str]:
     return stats
 
 def get_boolean_stats(series: pl.Series) -> List[str]:
+    non_null_count = series.drop_nulls().len()
+    # Count True values by summing the boolean series after dropping nulls.
+    true_count = int(series.drop_nulls().sum() or 0)
+    false_count = non_null_count - true_count
+
     return [
-        f"Non-Nulls: {series.drop_nulls().len()}",
+        f"Non-Nulls: {non_null_count}",
         f"Nulls: {series.is_null().sum()}",
-        f"True: {(series == True).sum()}",
-        f"False: {(series == False).sum()}",
-        f"Mode: {series.mode()[0] if series.mode().len() > 0 else 'N/A'}"
+        f"True: {true_count}",
+        f"False: {false_count}",
+        f"Mode: {series.mode()[0] if series.mode().len() > 0 else 'N/A'}",
     ]
 
 def get_date_stats(series: pl.Series) -> List[str]:
@@ -153,7 +158,7 @@ def generate_statistics(model) -> str:
 
     return "\n\n".join(stats)
 
-def get_column_types(df: pl.DataFrame) -> dict:
+def get_column_types(df: pl.DataFrame) -> Dict[str, str]:
     return {col: str(dtype) for col, dtype in df.schema.items()}
 
 def get_column_type_counts_string(df: pl.DataFrame) -> str:
@@ -161,7 +166,7 @@ def get_column_type_counts_string(df: pl.DataFrame) -> str:
     type_counts = Counter(str(dtype) for dtype in df.schema.values())
     return ", ".join(f"{dtype}: {count}" for dtype, count in type_counts.items())
 
-def update_statistics(self):
+def update_statistics(self) -> None:
     if hasattr(self, 'model') and self.model is not None:
         df = self.model._data
         self.row_count_label.setText(f"Total Rows: {df.height}")
