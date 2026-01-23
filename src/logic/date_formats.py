@@ -40,9 +40,9 @@ DATETIME_FORMATS = [
 # Optional: quick regex hints that can be used to pre-classify strings.
 # Keep these conservative (not too greedy) and add more if needed.
 DATE_REGEX_HINTS = [
-    r"^\d{4}-\d{2}-\d{2}$",          # 2024-01-31
-    r"^\d{1,2}/\d{1,2}/\d{2,4}$",   # 1/31/24 or 01/31/2024
-    r"^\d{1,2}-\d{1,2}-\d{2,4}$",   # 31-01-2024
+    r"^\d{4}-\d{2}-\d{2}$",  # 2024-01-31
+    r"^\d{1,2}/\d{1,2}/\d{2,4}$",  # 1/31/24 or 01/31/2024
+    r"^\d{1,2}-\d{1,2}-\d{2,4}$",  # 31-01-2024
 ]
 
 DATETIME_REGEX_HINTS = [

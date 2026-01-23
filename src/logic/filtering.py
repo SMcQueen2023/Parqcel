@@ -3,13 +3,16 @@
 This module contains `apply_filter_to_df` which performs the core filtering
 logic in a way that's easy to unit-test without Qt dialogs.
 """
+
 from __future__ import annotations
 
 from typing import Any
 import polars as pl
 
 
-def apply_filter_to_df(df: pl.DataFrame, column_name: str, filter_type: str, filter_value: Any) -> pl.DataFrame:
+def apply_filter_to_df(
+    df: pl.DataFrame, column_name: str, filter_type: str, filter_value: Any
+) -> pl.DataFrame:
     """Apply a filter to `df` on `column_name` using `filter_type` and `filter_value`.
 
     Supported filter_type values: 'contains', 'starts_with', 'ends_with', '==',

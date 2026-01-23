@@ -1,6 +1,19 @@
 from PyQt6.QtWidgets import (
-    QMainWindow, QFileDialog, QTableView, QVBoxLayout, QWidget, QPushButton, QHBoxLayout, QLineEdit, QLabel, QMenu, QMessageBox, QInputDialog,
-    QDialog, QTextEdit, QSizePolicy
+    QMainWindow,
+    QFileDialog,
+    QTableView,
+    QVBoxLayout,
+    QWidget,
+    QPushButton,
+    QHBoxLayout,
+    QLineEdit,
+    QLabel,
+    QMenu,
+    QMessageBox,
+    QInputDialog,
+    QDialog,
+    QTextEdit,
+    QSizePolicy,
 )
 from PyQt6.QtGui import QAction, QFont
 from PyQt6.QtCore import Qt, QPoint
@@ -20,10 +33,12 @@ from app.edit_menu_controller import add_column
 from logic.stats import (
     generate_statistics,
     get_column_statistics,
-    get_column_type_counts_string
+    get_column_type_counts_string,
 )
 import logging
+
 logger = logging.getLogger(__name__)
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -34,8 +49,12 @@ class MainWindow(QMainWindow):
         self._createMenuBar()
 
         self.table_view = QTableView()
-        self.table_view.horizontalHeader().setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.table_view.horizontalHeader().customContextMenuRequested.connect(self.show_context_menu)
+        self.table_view.horizontalHeader().setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu
+        )
+        self.table_view.horizontalHeader().customContextMenuRequested.connect(
+            self.show_context_menu
+        )
 
         layout = QVBoxLayout()
 
@@ -75,7 +94,7 @@ class MainWindow(QMainWindow):
             self.first_button,
             self.prev_button,
             self.next_button,
-            self.last_button
+            self.last_button,
         ]
         for button in pagination_buttons:
             button.setFont(pagination_font)
@@ -107,14 +126,22 @@ class MainWindow(QMainWindow):
 
         # Cap Jump/Undo/Redo sizes to avoid stretching on large windows
         self.jump_button.setFixedWidth(80)
-        self.jump_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.jump_button.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+        )
         self.undo_button.setFixedWidth(80)
-        self.undo_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.undo_button.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+        )
         self.redo_button.setFixedWidth(80)
-        self.redo_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.redo_button.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+        )
 
         # Page info label should expand to absorb available space so buttons don't stretch
-        self.page_info_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.page_info_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
 
         self.pagination_layout.addWidget(self.jump_button)
         self.pagination_layout.addWidget(self.page_info_label)
@@ -174,10 +201,7 @@ class MainWindow(QMainWindow):
     def open_file(self):
         file_dialog = QFileDialog(self)
         file_path, _ = file_dialog.getOpenFileName(
-            self,
-            "Open Parquet File",
-            "",
-            "Data Files (*.parquet *.csv *.xlsx)"
+            self, "Open Parquet File", "", "Data Files (*.parquet *.csv *.xlsx)"
         )
 
         if file_path:
@@ -191,7 +215,9 @@ class MainWindow(QMainWindow):
                 elif ext == ".xlsx":
                     df = pl.read_excel(file_path)
                 else:
-                    QMessageBox.warning(self, "Unsupported Format", f"Unsupported file extension: {ext}")
+                    QMessageBox.warning(
+                        self, "Unsupported Format", f"Unsupported file extension: {ext}"
+                    )
                     return
 
                 self.model = PolarsTableModel(df)
@@ -212,15 +238,17 @@ class MainWindow(QMainWindow):
         if not self.is_model_loaded():
             return
 
-        file_name, _ = QFileDialog.getSaveFileName(self, "Save Parquet File", "", "Parquet Files (*.parquet)")
+        file_name, _ = QFileDialog.getSaveFileName(
+            self, "Save Parquet File", "", "Parquet Files (*.parquet)"
+        )
         if file_name:
             try:
                 self.model._data.write_parquet(file_name)
             except Exception as e:
                 QMessageBox.critical(self, "Save Error", f"Error saving file: {e}")
-    
+
     def is_model_loaded(self):
-        if not hasattr(self, 'model') or self.model is None:
+        if not hasattr(self, "model") or self.model is None:
             QMessageBox.warning(self, "No Data", "Please load a file first.")
             return False
         return True
@@ -254,7 +282,7 @@ class MainWindow(QMainWindow):
             return
         page_number = self.page_input.text()
         if page_number.isdigit():
-            page_number = int(page_number) -1  # Convert to zero-based index
+            page_number = int(page_number) - 1  # Convert to zero-based index
             self.model.jump_to_page(page_number)
             self.update_page_info()
 
@@ -369,21 +397,14 @@ class MainWindow(QMainWindow):
         if not self.is_model_loaded():
             return
 
-        type_options = [
-            "String",
-            "Integer",
-            "Float",
-            "Boolean",
-            "Date",
-            "Datetime"
-        ]
+        type_options = ["String", "Integer", "Float", "Boolean", "Date", "Datetime"]
         new_type, ok = QInputDialog.getItem(
             self,
             "Convert Column Type",
             f"Convert '{column_name}' to:",
             type_options,
             0,
-            False
+            False,
         )
         if not ok:
             return
@@ -394,14 +415,17 @@ class MainWindow(QMainWindow):
             "Float": pl.Float64,
             "Boolean": pl.Boolean,
             "Date": pl.Date,
-            "Datetime": pl.Datetime
+            "Datetime": pl.Datetime,
         }
 
         try:
             target_type = type_map[new_type]
             column_expr = pl.col(column_name)
             # If converting from string to date/datetime, do Python-side parsing
-            if new_type in ["Date", "Datetime"] and self.model._data.schema[column_name] == pl.Utf8:
+            if (
+                new_type in ["Date", "Datetime"]
+                and self.model._data.schema[column_name] == pl.Utf8
+            ):
                 # Use parser helpers from `logic.parsers` for single-value parsing
                 # and sample-based format detection. Vectorized parsing is still
                 # attempted first for performance; fallbacks use the helpers.
@@ -414,7 +438,9 @@ class MainWindow(QMainWindow):
                 if best_dt_fmt:
                     try:
                         converted_df_temp = self.model._data.with_columns(
-                            pl.col(column_name).str.strptime(pl.Datetime, best_dt_fmt, strict=False).alias(column_name)
+                            pl.col(column_name)
+                            .str.strptime(pl.Datetime, best_dt_fmt, strict=False)
+                            .alias(column_name)
                         )
                     except Exception:
                         converted_df_temp = None
@@ -431,14 +457,20 @@ class MainWindow(QMainWindow):
                                 if v is None:
                                     parsed_vals[i] = parse_single_datetime(orig_vals[i])
                             try:
-                                new_col = pl.Series(name=column_name, values=parsed_vals).cast(pl.Datetime)
+                                new_col = pl.Series(
+                                    name=column_name, values=parsed_vals
+                                ).cast(pl.Datetime)
                             except Exception:
-                                new_col = pl.Series(name=column_name, values=parsed_vals)
+                                new_col = pl.Series(
+                                    name=column_name, values=parsed_vals
+                                )
                             converted_df = self.model._data.with_columns(new_col)
                     else:
                         parsed = parse_list_of_datetimes(vals)
                         try:
-                            new_col = pl.Series(name=column_name, values=parsed).cast(pl.Datetime)
+                            new_col = pl.Series(name=column_name, values=parsed).cast(
+                                pl.Datetime
+                            )
                         except Exception:
                             new_col = pl.Series(name=column_name, values=parsed)
                         converted_df = self.model._data.with_columns(new_col)
@@ -448,9 +480,13 @@ class MainWindow(QMainWindow):
                     if best_date_fmt:
                         try:
                             converted_df_temp = self.model._data.with_columns(
-                                pl.col(column_name).str.strptime(pl.Date, best_date_fmt, strict=False).alias(column_name)
+                                pl.col(column_name)
+                                .str.strptime(pl.Date, best_date_fmt, strict=False)
+                                .alias(column_name)
                             )
-                            converted_df_temp = converted_df_temp.with_columns(pl.col(column_name).cast(pl.Datetime).alias(column_name))
+                            converted_df_temp = converted_df_temp.with_columns(
+                                pl.col(column_name).cast(pl.Datetime).alias(column_name)
+                            )
                         except Exception:
                             converted_df_temp = None
 
@@ -464,26 +500,43 @@ class MainWindow(QMainWindow):
                                 orig_vals = self.model._data[column_name].to_list()
                                 for i, v in enumerate(parsed_vals):
                                     if v is None:
-                                        parsed_vals[i] = parse_single_datetime(orig_vals[i])
+                                        parsed_vals[i] = parse_single_datetime(
+                                            orig_vals[i]
+                                        )
                                 try:
-                                    new_col = pl.Series(name=column_name, values=parsed_vals).cast(pl.Datetime)
+                                    new_col = pl.Series(
+                                        name=column_name, values=parsed_vals
+                                    ).cast(pl.Datetime)
                                 except Exception:
-                                    new_col = pl.Series(name=column_name, values=parsed_vals)
+                                    new_col = pl.Series(
+                                        name=column_name, values=parsed_vals
+                                    )
                                 converted_df = self.model._data.with_columns(new_col)
                         else:
                             parsed = parse_list_of_datetimes(vals)
                             try:
-                                new_col = pl.Series(name=column_name, values=parsed).cast(pl.Datetime)
+                                new_col = pl.Series(
+                                    name=column_name, values=parsed
+                                ).cast(pl.Datetime)
                             except Exception:
                                 new_col = pl.Series(name=column_name, values=parsed)
                             converted_df = self.model._data.with_columns(new_col)
                     else:
                         # 3) Try coalescing several safe datetime formats (exclude %y)
-                        polars_dt_formats = [f for f in DATETIME_FORMATS if "%y" not in f]
-                        parsed_exprs = [pl.col(column_name).str.strptime(pl.Datetime, fmt, strict=False) for fmt in polars_dt_formats]
+                        polars_dt_formats = [
+                            f for f in DATETIME_FORMATS if "%y" not in f
+                        ]
+                        parsed_exprs = [
+                            pl.col(column_name).str.strptime(
+                                pl.Datetime, fmt, strict=False
+                            )
+                            for fmt in polars_dt_formats
+                        ]
                         if parsed_exprs:
                             combined = pl.coalesce(parsed_exprs)
-                            converted_df_temp = self.model._data.with_columns(combined.alias(column_name))
+                            converted_df_temp = self.model._data.with_columns(
+                                combined.alias(column_name)
+                            )
                             parsed_series = converted_df_temp[column_name]
                             null_count = int(parsed_series.is_null().sum())
                             if null_count == 0:
@@ -493,22 +546,35 @@ class MainWindow(QMainWindow):
                                 orig_vals = self.model._data[column_name].to_list()
                                 for i, v in enumerate(parsed_vals):
                                     if v is None:
-                                        parsed_vals[i] = parse_single_datetime(orig_vals[i])
+                                        parsed_vals[i] = parse_single_datetime(
+                                            orig_vals[i]
+                                        )
                                 try:
-                                    new_col = pl.Series(name=column_name, values=parsed_vals).cast(pl.Datetime)
+                                    new_col = pl.Series(
+                                        name=column_name, values=parsed_vals
+                                    ).cast(pl.Datetime)
                                 except Exception:
-                                    new_col = pl.Series(name=column_name, values=parsed_vals)
+                                    new_col = pl.Series(
+                                        name=column_name, values=parsed_vals
+                                    )
                                 converted_df = self.model._data.with_columns(new_col)
                         else:
                             parsed = parse_list_of_datetimes(vals)
                             try:
-                                new_col = pl.Series(name=column_name, values=parsed).cast(pl.Datetime)
+                                new_col = pl.Series(
+                                    name=column_name, values=parsed
+                                ).cast(pl.Datetime)
                             except Exception:
                                 new_col = pl.Series(name=column_name, values=parsed)
                             converted_df = self.model._data.with_columns(new_col)
 
                 elapsed = time.perf_counter() - start
-                logger.info("Conversion of column '%s' to %s took %.2fs", column_name, new_type, elapsed)
+                logger.info(
+                    "Conversion of column '%s' to %s took %.2fs",
+                    column_name,
+                    new_type,
+                    elapsed,
+                )
             else:
                 converted_df = self.model._data.with_columns(
                     column_expr.cast(target_type).alias(column_name)
@@ -519,13 +585,13 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self,
                 "Conversion Error",
-                f"Could not convert '{column_name}' to {new_type}: {e}"
+                f"Could not convert '{column_name}' to {new_type}: {e}",
             )
 
     def generate_statistics(self):
         if not self.is_model_loaded():
             return
-        
+
         # Call the function from stats.py
         stats_text = generate_statistics(self.model)
 
@@ -558,7 +624,9 @@ class MainWindow(QMainWindow):
         df = self.model._data
         row_count = df.height
         total_columns = df.width
-        column_type_counts = get_column_type_counts_string(df)  # Get the string summary of column type counts
+        column_type_counts = get_column_type_counts_string(
+            df
+        )  # Get the string summary of column type counts
 
         # Update the footer labels
         self.row_count_label.setText(f"Total Rows: {row_count}")
@@ -568,7 +636,7 @@ class MainWindow(QMainWindow):
         return {
             "row_count": row_count,
             "total_columns": total_columns,
-            "column_types": column_type_counts
+            "column_types": column_type_counts,
         }
 
     def handle_add_column(self):
@@ -580,21 +648,27 @@ class MainWindow(QMainWindow):
             column_name, dtype, default_value = dialog.get_data()
             try:
                 if not column_name:
-                    QMessageBox.warning(self, "Invalid Column Name", "Column name cannot be empty.")
+                    QMessageBox.warning(
+                        self, "Invalid Column Name", "Column name cannot be empty."
+                    )
                     return
                 if column_name in self.model._data.columns:
                     QMessageBox.warning(
                         self,
                         "Duplicate Column",
-                        f"A column named '{column_name}' already exists."
+                        f"A column named '{column_name}' already exists.",
                     )
                     return
-                new_df = add_column(self.model._data, column_name, dtype, default_value)  # Pass DataFrame
-                self.model.update_data(new_df)  # Update the model with the new DataFrame
+                new_df = add_column(
+                    self.model._data, column_name, dtype, default_value
+                )  # Pass DataFrame
+                self.model.update_data(
+                    new_df
+                )  # Update the model with the new DataFrame
                 self.update_statistics()
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to add column: {e}")
-    
+
     def handle_multi_sort(self):
         if not self.is_model_loaded():
             print("Model is not loaded, cannot sort.")
@@ -606,12 +680,16 @@ class MainWindow(QMainWindow):
 
         if result == QDialog.DialogCode.Accepted:
             logger.debug("MultiSortDialog accepted")
-            criteria = dialog.get_sorting_criteria()  # List of (column_name, ascending_bool) tuples
+            criteria = (
+                dialog.get_sorting_criteria()
+            )  # List of (column_name, ascending_bool) tuples
             logger.debug("Sorting criteria received: %s", criteria)
 
             if criteria:
                 columns, directions = zip(*criteria)  # unzip into two lists
-                logger.info("Sorting columns: %s with directions: %s", columns, directions)
+                logger.info(
+                    "Sorting columns: %s with directions: %s", columns, directions
+                )
                 self.model.sort_multiple_columns(list(columns), list(directions))
             else:
                 logger.debug("No sort criteria provided.")
