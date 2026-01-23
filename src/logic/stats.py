@@ -1,5 +1,36 @@
 import polars as pl
-from typing import List, Dict
+from typing import Any, List, Dict, cast
+
+
+def _format_for_display(value: Any) -> str:
+    """Return a safe string for display, decoding bytes when possible."""
+    if isinstance(value, (bytes, bytearray)):
+        try:
+            return value.decode("utf-8")
+        except Exception:
+            return repr(value)
+    return "None" if value is None else str(value)
+
+
+def _format_number(value: Any, precision: int = 2) -> str:
+    """Format numeric values with given precision; fall back to safe display."""
+    try:
+        if isinstance(value, (int, float)):
+            return f"{value:.{precision}f}"
+    except Exception:
+        pass
+    return _format_for_display(value)
+
+
+def _safe_range(min_val: Any, max_val: Any) -> Any:
+    """Return max_val - min_val if it's a valid operation, else None."""
+    if min_val is None or max_val is None:
+        return None
+    # Try subtraction and fall back to None on failure
+    try:
+        return cast(Any, max_val) - cast(Any, min_val)
+    except Exception:
+        return None
 
 
 def _value_count_summary(series: pl.Series, max_items: int = 5) -> List[str]:
@@ -39,30 +70,33 @@ def _value_count_summary(series: pl.Series, max_items: int = 5) -> List[str]:
         return ["Value counts unavailable due to no numeric counts column."]
 
     total = len(series)
-    lines = []
+    lines: List[str] = []
     for row in (
         vc_df.sort(count_col, descending=True).head(max_items).iter_rows(named=True)
     ):
         value = row[value_col]
         count = row[count_col]
         percentage = (count / total) * 100 if total > 0 else 0
-        lines.append(f"{repr(value)}: {count} ({percentage:.2f}%)")
+        lines.append(f"{_format_for_display(value)}: {count} ({percentage:.2f}%)")
 
     return lines
 
 
 def get_numeric_stats(series: pl.Series) -> List[str]:
+    mean_val = series.mean()
+    std_val = series.std()
+    var_val = series.var()
     return [
         f"Non-Nulls: {series.drop_nulls().len()}",
         f"Nulls: {series.is_null().sum()}",
         f"Unique: {series.n_unique()}",
-        f"Min: {series.min()}",
-        f"Max: {series.max()}",
-        f"Mean: {series.mean():.2f}",
-        f"Median: {series.median()}",
-        f"Std Dev: {series.std():.2f}",
-        f"Variance: {series.var():.2f}",
-        f"Mode: {series.mode()[0] if series.mode().len() > 0 else 'N/A'}",
+        f"Min: {_format_for_display(series.min())}",
+        f"Max: {_format_for_display(series.max())}",
+        f"Mean: {_format_number(mean_val)}",
+        f"Median: {_format_for_display(series.median())}",
+        f"Std Dev: {_format_number(std_val)}",
+        f"Variance: {_format_number(var_val)}",
+        f"Mode: {_format_for_display(series.mode()[0]) if series.mode().len() > 0 else 'N/A'}",
     ]
 
 
@@ -75,10 +109,10 @@ def get_string_stats(series: pl.Series) -> List[str]:
         f"Nulls: {series.is_null().sum()}",
         f"Blanks: {(series == '').sum()}",
         f"Unique: {series.n_unique()}",
-        f"Min Length: {lengths.min()}",
-        f"Max Length: {lengths.max()}",
-        f"Median Length: {lengths.median()}",
-        f"Mean Length: {lengths.mean():.2f}",
+        f"Min Length: {_format_for_display(lengths.min())}",
+        f"Max Length: {_format_for_display(lengths.max())}",
+        f"Median Length: {_format_for_display(lengths.median())}",
+        f"Mean Length: {_format_number(lengths.mean())}",
     ]
 
     stats.append("Top Values:")
@@ -97,44 +131,47 @@ def get_boolean_stats(series: pl.Series) -> List[str]:
         f"Nulls: {series.is_null().sum()}",
         f"True: {true_count}",
         f"False: {false_count}",
-        f"Mode: {series.mode()[0] if series.mode().len() > 0 else 'N/A'}",
+        f"Mode: {_format_for_display(series.mode()[0]) if series.mode().len() > 0 else 'N/A'}",
     ]
 
 
 def get_date_stats(series: pl.Series) -> List[str]:
+    min_val = series.min()
+    max_val = series.max()
+    mode_val = series.mode()[0] if series.mode().len() > 0 else None
+
     return [
         f"Non-Nulls: {series.drop_nulls().len()}",
         f"Nulls: {series.is_null().sum()}",
         f"Unique: {series.n_unique()}",
-        f"Earliest: {series.min()}",
-        f"Latest: {series.max()}",
-        f"Median: {series.median()}",
-        f"Mode: {series.mode()[0] if series.mode().len() > 0 else 'N/A'}",
+        f"Earliest: {_format_for_display(min_val)}",
+        f"Latest: {_format_for_display(max_val)}",
+        f"Median: {_format_for_display(series.median())}",
+        f"Mode: {_format_for_display(mode_val) if mode_val is not None else 'N/A'}",
     ]
 
 
 def get_datetime_stats(series: pl.Series) -> List[str]:
     min_val = series.min()
     max_val = series.max()
-    range_val = (
-        max_val - min_val if min_val is not None and max_val is not None else None
-    )
+    range_val = _safe_range(min_val, max_val)
+    mode_val = series.mode()[0] if series.mode().len() > 0 else None
 
     return [
         f"Non-Nulls: {series.drop_nulls().len()}",
         f"Nulls: {series.is_null().sum()}",
         f"Unique: {series.n_unique()}",
-        f"Min: {min_val}",
-        f"Max: {max_val}",
-        f"Range: {range_val if range_val else 'N/A'}",
-        f"Median: {series.median()}",
-        f"Mode: {series.mode()[0] if series.mode().len() > 0 else 'N/A'}",
+        f"Min: {_format_for_display(min_val)}",
+        f"Max: {_format_for_display(max_val)}",
+        f"Range: {_format_for_display(range_val) if range_val is not None else 'N/A'}",
+        f"Median: {_format_for_display(series.median())}",
+        f"Mode: {_format_for_display(mode_val) if mode_val is not None else 'N/A'}",
     ]
 
 
 def get_fallback_stats(series: pl.Series) -> List[str]:
     return [
-        f"Type: {series.dtype}",
+        f"Type: {_format_for_display(series.dtype)}",
         f"Nulls: {series.is_null().sum()}",
         f"Unique: {series.n_unique()}",
         "Stats not supported for this type.",
@@ -181,7 +218,7 @@ def generate_statistics(model) -> str:
 
     for col_name in df.columns:
         col_series = df[col_name]
-        col_header = f"📊 Column: {col_name} ({col_series.dtype})"
+        col_header = f"📊 Column: {_format_for_display(col_name)} ({_format_for_display(col_series.dtype)})"
         col_stats = get_stats_for_column(col_series)
         stats.append("\n".join([col_header] + col_stats))
 
