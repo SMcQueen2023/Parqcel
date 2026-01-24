@@ -17,25 +17,45 @@ DATE_FORMATS = [
 
 DATETIME_FORMATS = [
     "%Y-%m-%d %H:%M:%S",
+    "%Y-%m-%d %H:%M:%S%.f",
     "%Y-%m-%d %H:%M",
     "%m/%d/%Y %H:%M:%S",
+    "%m/%d/%Y %H:%M:%S%.f",
     "%m/%d/%Y %H:%M",
     "%m/%d/%y %H:%M:%S",
+    "%m/%d/%y %H:%M:%S%.f",
     "%m/%d/%y %H:%M",
     "%Y/%m/%d %H:%M:%S",
+    "%Y/%m/%d %H:%M:%S%.f",
     "%Y/%m/%d %H:%M",
     "%d-%m-%Y %H:%M:%S",
+    "%d-%m-%Y %H:%M:%S%.f",
     "%d-%m-%Y %H:%M",
     "%d-%m-%y %H:%M:%S",
+    "%d-%m-%y %H:%M:%S%.f",
     "%d-%m-%y %H:%M",
     "%d/%m/%Y %H:%M:%S",
+    "%d/%m/%Y %H:%M:%S%.f",
     "%d/%m/%Y %H:%M",
     "%d/%m/%y %H:%M:%S",
+    "%d/%m/%y %H:%M:%S%.f",
     "%d/%m/%y %H:%M",
     "%Y-%m-%dT%H:%M:%S",
     "%Y-%m-%dT%H:%M:%S%.f",
     # Add more datetime patterns as needed
 ]
+
+# Python strptime expects fractional seconds using '.%f' (dot + %f).
+# Some formats above contain the chrono-compatible '%.f' used by Polars/chrono.
+# Provide Python-compatible variants for detection/fallback.
+PY_DATE_FORMATS = list(DATE_FORMATS)
+
+PY_DATETIME_FORMATS = [
+    f.replace("%.f", ".%f") for f in DATETIME_FORMATS
+]
+
+# Provide a Polars/chrono-compatible list (mostly same as DATETIME_FORMATS)
+POLARS_DATETIME_FORMATS = list(DATETIME_FORMATS)
 
 # Optional: quick regex hints that can be used to pre-classify strings.
 # Keep these conservative (not too greedy) and add more if needed.

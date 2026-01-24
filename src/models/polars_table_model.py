@@ -119,7 +119,12 @@ class PolarsTableModel(QAbstractTableModel):
             )
 
             self.dataChanged.emit(index, index, [Qt.ItemDataRole.DisplayRole])
+            # Notify views that layout and header data (types) may have changed
             self.layoutChanged.emit()
+            try:
+                self.headerDataChanged.emit(Qt.Orientation.Horizontal, 0, self.columnCount() - 1)
+            except Exception:
+                pass
             return True
         return False
 
@@ -182,8 +187,11 @@ class PolarsTableModel(QAbstractTableModel):
             self._data, self._current_page, self.chunk_size
         )
         self._column_types[column_name] = str(new_series.dtype)
-
         self.layoutChanged.emit()
+        try:
+            self.headerDataChanged.emit(Qt.Orientation.Horizontal, 0, self.columnCount() - 1)
+        except Exception:
+            pass
 
     def get_column_statistics(self, column_name: str) -> str:
         return get_column_statistics(self._data, column_name)
@@ -197,6 +205,10 @@ class PolarsTableModel(QAbstractTableModel):
             )
             self._column_types = get_column_types(self._data)
             self.layoutChanged.emit()
+            try:
+                self.headerDataChanged.emit(Qt.Orientation.Horizontal, 0, self.columnCount() - 1)
+            except Exception:
+                pass
 
     def redo(self) -> None:
         if self._redo_stack:
@@ -207,9 +219,18 @@ class PolarsTableModel(QAbstractTableModel):
             )
             self._column_types = get_column_types(self._data)
             self.layoutChanged.emit()
+            try:
+                self.headerDataChanged.emit(Qt.Orientation.Horizontal, 0, self.columnCount() - 1)
+            except Exception:
+                pass
 
     def update_data(self, new_df: pl.DataFrame) -> None:
         self.save_state()
+        # Full reset so views refresh headers and cached metadata
+        try:
+            self.beginResetModel()
+        except Exception:
+            pass
         self._data = new_df
         self._max_pages = calculate_max_pages(new_df.height, self.chunk_size)
         self._current_page = 0
@@ -217,7 +238,15 @@ class PolarsTableModel(QAbstractTableModel):
             self._data, self._current_page, self.chunk_size
         )
         self._column_types = get_column_types(self._data)
-        self.layoutChanged.emit()
+        try:
+            self.endResetModel()
+        except Exception:
+            # Fallback to layout/header signals if reset isn't available
+            self.layoutChanged.emit()
+            try:
+                self.headerDataChanged.emit(Qt.Orientation.Horizontal, 0, self.columnCount() - 1)
+            except Exception:
+                pass
 
     def sort_multiple_columns(self, columns: list[str], directions: list[bool]) -> None:
         try:
