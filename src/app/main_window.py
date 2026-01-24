@@ -21,13 +21,7 @@ import polars as pl
 import os
 import time
 from logic.filters import apply_filter  # Import logic to apply filters to dataframe
-from logic.date_formats import DATE_FORMATS, DATETIME_FORMATS
-from logic.parsers import (
-    detect_format_for_samples,
-    parse_single_datetime,
-    parse_list_of_datetimes,
-    convert_series_to_datetime,
-)
+from logic.parsers import convert_series_to_datetime
 from models.polars_table_model import PolarsTableModel  # Import the model class
 from app.widgets.edit_menu_gui import AddColumnDialog, MultiSortDialog
 from app.edit_menu_controller import add_column
@@ -453,29 +447,27 @@ class MainWindow(QMainWindow):
                     column_expr.cast(target_type).alias(column_name)
                 )
             self.model.update_data(converted_df)
-            # Re-assign the model to force the view to re-read header data and types
+            # Re-assign the model and refresh the view to re-read header data and types
             try:
                 self.table_view.setModel(self.model)
-            except Exception:
-                pass
-            # Force view refresh in case headers or displayed values are cached
-            try:
+                # Force view refresh in case headers or displayed values are cached
                 self.table_view.reset()
-            except Exception:
-                pass
-            try:
-                self.table_view.horizontalHeader().viewport().update()
-            except Exception:
-                pass
-            try:
-                self.table_view.viewport().update()
-            except Exception:
-                pass
-            # Adjust column sizes to reflect potential value width changes
-            try:
+                header = self.table_view.horizontalHeader()
+                if header is not None:
+                    viewport = header.viewport()
+                    if viewport is not None:
+                        viewport.update()
+                table_viewport = self.table_view.viewport()
+                if table_viewport is not None:
+                    table_viewport.update()
+                # Adjust column sizes to reflect potential value width changes
                 self.table_view.resizeColumnsToContents()
             except Exception:
-                pass
+                logger.exception(
+                    "Failed to refresh table view after converting column '%s' to %s",
+                    column_name,
+                    new_type,
+                )
             self.update_statistics()
         except Exception as e:
             QMessageBox.warning(
