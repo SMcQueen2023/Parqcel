@@ -30,6 +30,8 @@ from logic.stats import (
     get_column_statistics,
     get_column_type_counts_string,
 )
+from app.widgets.featurize_gui import FeaturizeDialog
+from ds.featurize import generate_feature_matrix, add_features_to_df, detect_columns
 import logging
 
 logger = logging.getLogger(__name__)
@@ -192,6 +194,12 @@ class MainWindow(QMainWindow):
         sort_columns_action = QAction("Sort Columns...", self)
         sort_columns_action.triggered.connect(self.handle_multi_sort)
         edit_menu.addAction(sort_columns_action)
+
+        # Analysis menu
+        analysis_menu = menu_bar.addMenu("Analysis")
+        featurize_action = QAction("Featurize Columns...", self)
+        featurize_action.triggered.connect(self.handle_featurize)
+        analysis_menu.addAction(featurize_action)
 
     def open_file(self):
         file_dialog = QFileDialog(self)
@@ -583,3 +591,35 @@ class MainWindow(QMainWindow):
                 logger.debug("No sort criteria provided.")
         else:
             logger.debug("MultiSortDialog canceled or closed")
+
+    def handle_featurize(self):
+        if not self.is_model_loaded():
+            return
+
+        df = self.model.get_dataframe()
+        numeric, categorical, text = detect_columns(df)
+
+        dialog = FeaturizeDialog(self.model.get_column_names(), numeric, categorical, text, parent=self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            selected = dialog.get_selected_columns()
+            # Split selected columns by detected type
+            sel_numeric = [c for c in selected if c in numeric]
+            sel_categorical = [c for c in selected if c in categorical]
+            sel_text = [c for c in selected if c in text]
+            opts = dialog.get_options()
+
+            try:
+                X, feature_names = generate_feature_matrix(
+                    df,
+                    numeric_cols=sel_numeric,
+                    categorical_cols=sel_categorical,
+                    text_cols=sel_text,
+                    scale_numeric=opts.get("scale_numeric"),
+                    one_hot=opts.get("one_hot", True),
+                    tfidf_max_features=opts.get("tfidf_max_features", 200),
+                )
+                new_df = add_features_to_df(df, X, feature_names)
+                self.model.update_data(new_df)
+                self.update_statistics()
+            except Exception as e:
+                QMessageBox.critical(self, "Featurize Error", f"Failed to featurize: {e}")
