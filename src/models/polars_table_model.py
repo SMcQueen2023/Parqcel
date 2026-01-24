@@ -124,7 +124,10 @@ class PolarsTableModel(QAbstractTableModel):
             try:
                 self.headerDataChanged.emit(Qt.Orientation.Horizontal, 0, self.columnCount() - 1)
             except Exception:
-                pass
+                logger.exception(
+                    "Failed to emit headerDataChanged signal for columns 0 to %d",
+                    self.columnCount() - 1,
+                )
             return True
         return False
 
@@ -191,7 +194,10 @@ class PolarsTableModel(QAbstractTableModel):
         try:
             self.headerDataChanged.emit(Qt.Orientation.Horizontal, 0, self.columnCount() - 1)
         except Exception:
-            pass
+            logger.exception(
+                "Failed to emit headerDataChanged signal for columns 0 to %d",
+                self.columnCount() - 1,
+            )
 
     def get_column_statistics(self, column_name: str) -> str:
         return get_column_statistics(self._data, column_name)
@@ -208,7 +214,10 @@ class PolarsTableModel(QAbstractTableModel):
             try:
                 self.headerDataChanged.emit(Qt.Orientation.Horizontal, 0, self.columnCount() - 1)
             except Exception:
-                pass
+                logger.exception(
+                    "Failed to emit headerDataChanged signal for columns 0 to %d during undo",
+                    self.columnCount() - 1,
+                )
 
     def redo(self) -> None:
         if self._redo_stack:
@@ -222,7 +231,10 @@ class PolarsTableModel(QAbstractTableModel):
             try:
                 self.headerDataChanged.emit(Qt.Orientation.Horizontal, 0, self.columnCount() - 1)
             except Exception:
-                pass
+                logger.exception(
+                    "Failed to emit headerDataChanged signal for columns 0 to %d during redo",
+                    self.columnCount() - 1,
+                )
 
     def update_data(self, new_df: pl.DataFrame) -> None:
         self.save_state()
@@ -230,7 +242,9 @@ class PolarsTableModel(QAbstractTableModel):
         try:
             self.beginResetModel()
         except Exception:
-            pass
+            logger.exception(
+                "beginResetModel failed; proceeding with manual reset/fallback signals"
+            )
         self._data = new_df
         self._max_pages = calculate_max_pages(new_df.height, self.chunk_size)
         self._current_page = 0
@@ -242,11 +256,15 @@ class PolarsTableModel(QAbstractTableModel):
             self.endResetModel()
         except Exception:
             # Fallback to layout/header signals if reset isn't available
+            logger.exception("endResetModel failed; falling back to layout/header signals")
             self.layoutChanged.emit()
             try:
                 self.headerDataChanged.emit(Qt.Orientation.Horizontal, 0, self.columnCount() - 1)
             except Exception:
-                pass
+                logger.exception(
+                    "Failed to emit headerDataChanged signal during endResetModel fallback for columns 0 to %d",
+                    self.columnCount() - 1,
+                )
 
     def sort_multiple_columns(self, columns: list[str], directions: list[bool]) -> None:
         try:

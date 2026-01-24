@@ -9,12 +9,13 @@ from typing import Iterable, List, Optional, Any
 import datetime
 
 from .date_formats import (
-    DATE_FORMATS,
     DATETIME_FORMATS,
     PY_DATETIME_FORMATS,
     PY_DATE_FORMATS,
-    POLARS_DATETIME_FORMATS,
 )
+import logging
+
+logger = logging.getLogger(__name__)
 import polars as pl
 
 
@@ -138,7 +139,8 @@ def convert_series_to_datetime(series: "pl.Series", allow_fallback: bool = True)
                 if len(sample_vals) >= 500:
                     break
         except Exception:
-            # Fallback iterator
+            # Fallback iterator: try iterating the series if head()/to_list() failed
+            logger.debug("Head-based sampling failed; falling back to iterator sampling", exc_info=True)
             for v in series:
                 if v is None:
                     continue
@@ -180,7 +182,7 @@ def convert_series_to_datetime(series: "pl.Series", allow_fallback: bool = True)
                         "Vectorized parse produced nulls and fallback is disabled"
                     )
             except Exception:
-                pass
+                logger.debug("Vectorized parse using detected datetime format failed: %s", best_dt_fmt, exc_info=True)
 
         # 1b) If we detected a clear date-only format, parse as Date then cast to Datetime at midnight
         if best_date_fmt:
@@ -193,7 +195,7 @@ def convert_series_to_datetime(series: "pl.Series", allow_fallback: bool = True)
                 if not allow_fallback:
                     raise ValueError("Date-format vectorized parse produced nulls and fallback is disabled")
             except Exception:
-                pass
+                logger.debug("Vectorized parse using detected date-only format failed: %s", best_date_fmt, exc_info=True)
 
         # 2) Try safe (4-digit year) formats first to avoid ambiguous %y parsing
         safe_formats = [f for f in DATETIME_FORMATS if "%y" not in f]
@@ -204,6 +206,7 @@ def convert_series_to_datetime(series: "pl.Series", allow_fallback: bool = True)
             try:
                 piece = series.str.strptime(pl.Datetime, fmt, strict=False)
             except Exception:
+                logger.debug("Vectorized parse failed for format: %s", fmt, exc_info=False)
                 continue
             parsed = piece if parsed is None else parsed.fill_null(piece)
             if int(parsed.is_null().sum()) == 0:
@@ -217,6 +220,7 @@ def convert_series_to_datetime(series: "pl.Series", allow_fallback: bool = True)
                 try:
                     piece = series.str.strptime(pl.Datetime, fmt, strict=False)
                 except Exception:
+                    logger.debug("Vectorized parse failed for (fallback) format: %s", fmt, exc_info=False)
                     continue
                 parsed = piece if parsed is None else parsed.fill_null(piece)
                 if int(parsed.is_null().sum()) == 0:
@@ -238,12 +242,17 @@ def convert_series_to_datetime(series: "pl.Series", allow_fallback: bool = True)
             null_mask = parsed.is_null().to_list()
             for i, is_null in enumerate(null_mask):
                 if is_null:
-                    parsed_vals[i] = parse_single_datetime(series[i])
+                    try:
+                        parsed_vals[i] = parse_single_datetime(series[i])
+                    except Exception:
+                        logger.debug("Python fallback failed for index %d", i, exc_info=True)
 
         try:
             new_col = pl.Series(name=name, values=parsed_vals).cast(pl.Datetime)
         except Exception:
+            logger.debug("Failed to cast parsed values to pl.Datetime for column %s, returning best-effort series", name, exc_info=True)
             new_col = pl.Series(name=name, values=parsed_vals)
         return new_col
     except Exception:
+        logger.exception("convert_series_to_datetime failed unexpectedly; returning original series")
         return series
