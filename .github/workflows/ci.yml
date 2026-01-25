@@ -5,19 +5,25 @@ on:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
-
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install system dependencies for PyQt6
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1-mesa-dri
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install package with dev extras
+      - name: Install Python deps and project (dev extras)
         run: |
           python -m pip install --upgrade pip
+          # Install NumPy early to satisfy any build-time imports during project install
+          python -m pip install numpy
           python -m pip install .[dev]
+          python -m pip install scikit-learn
       - name: Run tests
         run: pytest -q

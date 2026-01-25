@@ -36,7 +36,6 @@ from ds.featurize import generate_feature_matrix, add_features_to_df, detect_col
 from app.widgets.pca_gui import PCADialog
 from ds.dimensionality import compute_pca, compute_umap
 import webbrowser
-import numpy as np
 import ast
 from app.widgets.ai_assistant import AIAssistantWidget
 from app.widgets.ai_settings import AISettingsDialog
@@ -649,6 +648,11 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(self, "Featurize Error", f"Failed to featurize: {e}")
 
     def handle_dimensionality(self):
+        try:
+            import numpy as np
+        except Exception:
+            QMessageBox.critical(self, "Missing dependency", "NumPy is required for dimensionality reduction. Install the '[ml]' extras or numpy in your environment.")
+            return
         if not self.is_model_loaded():
             return
 

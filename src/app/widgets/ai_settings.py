@@ -34,29 +34,27 @@ class AISettingsDialog(QDialog):
 
         layout = QVBoxLayout(self)
 
-        # Provider
+        # Provider selector
         prov_layout = QHBoxLayout()
         prov_layout.addWidget(QLabel("Provider:"))
         self.provider = QComboBox()
-        self.provider.addItems(["dummy", "openai", "hf"])
+        self.provider.addItems(["dummy", "openai", "hf"]) 
         self.provider.setCurrentText(cfg.get("provider", "dummy"))
         prov_layout.addWidget(self.provider)
         layout.addLayout(prov_layout)
 
-        # OpenAI key
+        # OpenAI key entry
         key_layout = QHBoxLayout()
         key_layout.addWidget(QLabel("OpenAI API Key:"))
         self.key_input = QLineEdit()
-        self.key_input.setEchoMode(QLineEdit.EchoMode.Password)
-        # try to read from keyring
-        if keyring is not None:
-            try:
+        try:
+            if keyring is not None:
                 stored = keyring.get_password("parqcel", "openai_api_key")
                 if stored:
                     self.key_input.setText(stored)
-            except Exception:
-                # If keyring read fails, ignore and leave input blank
-                logger.exception("Failed to read API key from keyring")
+        except Exception:
+            logger.exception("Failed to read API key from keyring")
+        self.key_input.setEchoMode(QLineEdit.EchoMode.Password)
         key_layout.addWidget(self.key_input)
         layout.addLayout(key_layout)
 
@@ -67,6 +65,7 @@ class AISettingsDialog(QDialog):
         self.keyring_label = QLabel(keyring_msg)
         layout.addWidget(self.keyring_label)
 
+        # OpenAI base
         base_layout = QHBoxLayout()
         base_layout.addWidget(QLabel("OpenAI API Base (optional):"))
         self.base_input = QLineEdit()
@@ -74,6 +73,7 @@ class AISettingsDialog(QDialog):
         base_layout.addWidget(self.base_input)
         layout.addLayout(base_layout)
 
+        # HF model
         hf_layout = QHBoxLayout()
         hf_layout.addWidget(QLabel("HF Model (hf provider):"))
         self.hf_input = QLineEdit()
@@ -82,6 +82,7 @@ class AISettingsDialog(QDialog):
         hf_layout.addWidget(self.hf_input)
         layout.addLayout(hf_layout)
 
+        # Buttons
         btn_layout = QHBoxLayout()
         self.test_btn = QPushButton("Test Connection")
         self.save_btn = QPushButton("Save")

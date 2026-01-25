@@ -1,6 +1,11 @@
 import os
 import sys
 import pytest
+
+# Ensure Qt can run headless during CI and local test runs where no display is available.
+# Must set before importing PyQt modules.
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
 from PyQt6.QtWidgets import QApplication
 
 SRC_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))

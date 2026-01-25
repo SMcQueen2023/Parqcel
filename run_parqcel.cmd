@@ -1,5 +1,17 @@
 @echo off
 setlocal
-set PY_EXE=C:\Users\scott\AppData\Local\Programs\Python\Python313\python.exe
-"%PY_EXE%" -m parqcel %*
+REM Use the py launcher if available, falling back to python on PATH
+where py >nul 2>&1
+if %errorlevel%==0 (
+	py -3 -m parqcel %*
+) else (
+	where python >nul 2>&1
+	if %errorlevel%==0 (
+		python -m parqcel %*
+	) else (
+		echo Python not found. Please install Python 3 and try again.
+		endlocal
+		exit /b 1
+	)
+)
 endlocal
