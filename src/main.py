@@ -3,6 +3,7 @@ from PyQt6.QtGui import QIcon
 from app.main_window import MainWindow
 from logging_config import configure_logging
 import importlib.resources as resources
+from importlib.resources import as_file
 import logging
 
 
@@ -19,8 +20,6 @@ def main():
     # Set application icon from packaged assets, if available
     try:
         icon_res = resources.files("parqcel.assets").joinpath("parqcel_icon.svg")
-        from importlib.resources import as_file
-
         with as_file(icon_res) as icon_path:
             window.setWindowIcon(QIcon(str(icon_path)))
     except Exception:
