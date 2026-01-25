@@ -18,8 +18,10 @@ def main():
 
     # Set application icon from packaged assets, if available
     try:
-        icon_path = resources.files("parqcel.assets").joinpath("parqcel_icon.svg")
-        if icon_path.is_file():
+        icon_res = resources.files("parqcel.assets").joinpath("parqcel_icon.svg")
+        from importlib.resources import as_file
+
+        with as_file(icon_res) as icon_path:
             window.setWindowIcon(QIcon(str(icon_path)))
     except Exception:
         logger.exception("Failed to set application icon")

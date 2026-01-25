@@ -1,5 +1,5 @@
 @echo off
 setlocal
-set PY_EXE=C:\Users\scott\AppData\Local\Programs\Python\Python313\python.exe
-"%PY_EXE%" -m parqcel %*
+REM Use the py launcher if available, falling back to python on PATH
+py -3 -m parqcel %*
 endlocal

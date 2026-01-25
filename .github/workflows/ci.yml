@@ -11,6 +11,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install system dependencies for PyQt6
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1
       - name: Set up Python
         uses: actions/setup-python@v5
         with:

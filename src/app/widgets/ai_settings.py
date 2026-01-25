@@ -34,33 +34,36 @@ class AISettingsDialog(QDialog):
 
         layout = QVBoxLayout(self)
 
-        # Provider
-        prov_layout = QHBoxLayout()
-        prov_layout.addWidget(QLabel("Provider:"))
-        self.provider = QComboBox()
-        self.provider.addItems(["dummy", "openai", "hf"])
-        self.provider.setCurrentText(cfg.get("provider", "dummy"))
-        prov_layout.addWidget(self.provider)
-        layout.addLayout(prov_layout)
+        # import backend factory lazily to avoid heavy ML imports during module import
+        try:
+            from ai.backends import create_backend
 
-        # OpenAI key
-        key_layout = QHBoxLayout()
-        key_layout.addWidget(QLabel("OpenAI API Key:"))
-        self.key_input = QLineEdit()
-        self.key_input.setEchoMode(QLineEdit.EchoMode.Password)
-        # try to read from keyring
-        if keyring is not None:
-            try:
-                stored = keyring.get_password("parqcel", "openai_api_key")
-                if stored:
-                    self.key_input.setText(stored)
-            except Exception:
-                # If keyring read fails, ignore and leave input blank
-                logger.exception("Failed to read API key from keyring")
-        key_layout.addWidget(self.key_input)
-        layout.addLayout(key_layout)
+            backend = create_backend(cfg)
+        except Exception as e:
+            QMessageBox.critical(self, "Test Failed", f"Could not create backend: {e}")
+            return
 
-        if keyring is not None:
+        # attempt a small ping; disable button while running and ensure re-enabled
+        self.test_btn.setEnabled(False)
+        try:
+            import time
+            start = time.perf_counter()
+            ok = False
+            if hasattr(backend, "test_connection"):
+                ok = backend.test_connection()
+            else:
+                # fallback: call generate_text with a ping prompt
+                resp = backend.generate_text("ping")
+                ok = resp is not None
+            elapsed = time.perf_counter() - start
+            if ok:
+                QMessageBox.information(self, "Test Succeeded", f"Connection OK (latency {elapsed:.2f}s)")
+            else:
+                QMessageBox.warning(self, "Test Result", "Backend did not indicate success")
+        except Exception as e:
+            QMessageBox.critical(self, "Test Failed", f"Error during test: {e}")
+        finally:
+            self.test_btn.setEnabled(True)
             keyring_msg = "Keyring available: keys will be stored securely."
         else:
             keyring_msg = "Keyring unavailable: API keys will not be saved; install 'keyring' to persist."

@@ -18,7 +18,7 @@ Name: "desktopicon"; Description: "Create a &desktop icon"; Flags: unchecked
 
 [Files]
 ; Copy project files into install dir. Adjust Source path if building from elsewhere.
-Source: "{#SourcePath}\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion createallsubdirs; Excludes: ".git;.venv;__pycache__;*.pyc;*.pyo;dist;build;.mypy_cache;.ruff_cache;.pytest_cache;.tox"
+Source: "{#SourcePath}\..\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion createallsubdirs; Excludes: ".git;.venv;__pycache__;*.pyc;*.pyo;dist;build;.mypy_cache;.ruff_cache;.pytest_cache;.tox"
 ; Also drop the icon at the app root for shortcut reliability
 Source: "{#SourcePath}\..\src\parqcel\assets\parqcel_icon.ico"; DestDir: "{app}"; Flags: ignoreversion
 
@@ -57,6 +57,11 @@ begin
     Result := ExpandConstant('{pf64}\\Python311\\python.exe');
     exit;
   end;
-  // Last resort: hope python.exe is on PATH
+  // Last resort: try the py launcher in System32, otherwise python.exe on PATH
+  if FileExists(ExpandConstant('{sys}\py.exe')) then
+  begin
+    Result := 'py'
+    exit;
+  end;
   Result := 'python.exe';
 end;
