@@ -32,6 +32,11 @@ from logic.stats import (
 )
 from app.widgets.featurize_gui import FeaturizeDialog
 from ds.featurize import generate_feature_matrix, add_features_to_df, detect_columns
+from app.widgets.pca_gui import PCADialog
+from ds.dimensionality import compute_pca, compute_umap
+import webbrowser
+import tempfile
+import numpy as np
 import logging
 
 logger = logging.getLogger(__name__)
@@ -200,6 +205,9 @@ class MainWindow(QMainWindow):
         featurize_action = QAction("Featurize Columns...", self)
         featurize_action.triggered.connect(self.handle_featurize)
         analysis_menu.addAction(featurize_action)
+        dim_action = QAction("Dimensionality Reduction...", self)
+        dim_action.triggered.connect(self.handle_dimensionality)
+        analysis_menu.addAction(dim_action)
 
     def open_file(self):
         file_dialog = QFileDialog(self)
@@ -623,3 +631,134 @@ class MainWindow(QMainWindow):
                 self.update_statistics()
             except Exception as e:
                 QMessageBox.critical(self, "Featurize Error", f"Failed to featurize: {e}")
+
+    def handle_dimensionality(self):
+        if not self.is_model_loaded():
+            return
+
+        df = self.model.get_dataframe()
+        col_names = self.model.get_column_names()
+
+        dialog = PCADialog(col_names, parent=self)
+        # allow coloring by any column
+        dialog.set_color_choices(col_names)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        selected = dialog.get_selected_columns()
+        if not selected:
+            QMessageBox.warning(self, "No features", "Please select at least one feature column.")
+            return
+
+        opts = dialog.get_options()
+        method = opts.get("method")
+        n_components = opts.get("n_components", 2)
+        color_by = opts.get("color_by")
+        sample = opts.get("sample", 10000)
+
+        try:
+            # build feature matrix
+            try:
+                X = df.select(selected).to_numpy()
+            except Exception:
+                X = df.select(selected).to_pandas().values
+
+            # downsample for visualization if requested
+            if sample and sample > 0 and X.shape[0] > sample:
+                rng = np.random.default_rng(0)
+                idx = rng.choice(X.shape[0], size=sample, replace=False)
+                X_vis = X[idx]
+                color_vals = None
+                if color_by:
+                    try:
+                        color_series = df[color_by].to_list()
+                        color_vals = [color_series[i] for i in idx]
+                    except Exception:
+                        color_vals = None
+            else:
+                X_vis = X
+                color_vals = None
+                if color_by:
+                    try:
+                        color_vals = df[color_by].to_list()
+                    except Exception:
+                        color_vals = None
+
+            # compute embedding
+            if method.startswith("PCA"):
+                emb, var_ratio = compute_pca(X_vis, n_components=n_components)
+            else:
+                emb = compute_umap(X_vis, n_components=n_components)
+                var_ratio = None
+
+            # plot using plotly if available, fallback to saving CSV
+            try:
+                import plotly.graph_objects as go
+
+                # Prepare customdata (index, color value, and up to two feature columns)
+                custom_cols = [list(range(len(emb)))]  # index
+                hover_names = ["index"]
+                if color_vals is not None:
+                    custom_cols.append(color_vals)
+                    hover_names.append("color")
+
+                extra_hover_cols = []
+                for c in selected:
+                    if len(extra_hover_cols) >= 2:
+                        break
+                    if c == color_by:
+                        continue
+                    try:
+                        vals = df[c].to_list()
+                        custom_cols.append(vals)
+                        hover_names.append(c)
+                        extra_hover_cols.append(c)
+                    except Exception:
+                        continue
+
+                try:
+                    customdata = np.column_stack([np.array(col) for col in custom_cols])
+                except Exception:
+                    customdata = None
+
+                if customdata is not None:
+                    hover_lines = [f"{name}: %{{customdata[{i}]}}" for i, name in enumerate(hover_names)]
+                    hovertemplate = "<br>".join(hover_lines) + "<extra></extra>"
+                else:
+                    hovertemplate = None
+
+                if n_components == 2:
+                    trace = go.Scatter(
+                        x=emb[:, 0],
+                        y=emb[:, 1],
+                        mode="markers",
+                        marker=dict(color=color_vals),
+                        customdata=customdata,
+                        hovertemplate=hovertemplate,
+                    )
+                else:
+                    trace = go.Scatter3d(
+                        x=emb[:, 0],
+                        y=emb[:, 1],
+                        z=emb[:, 2],
+                        mode="markers",
+                        marker=dict(color=color_vals, size=3),
+                        customdata=customdata,
+                        hovertemplate=hovertemplate,
+                    )
+
+                fig = go.Figure(data=[trace])
+
+                tmp = tempfile.NamedTemporaryFile(suffix=".html", delete=False)
+                fig.write_html(tmp.name)
+                webbrowser.open(tmp.name)
+            except Exception as e:
+                QMessageBox.information(
+                    self,
+                    "Dimensionality Result",
+                    f"Embedding computed (shape {emb.shape}). Could not render interactive plot: {e}",
+                )
+
+        except Exception as e:
+            QMessageBox.critical(self, "Dimensionality Error", f"Failed to compute embedding: {e}")
