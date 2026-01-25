@@ -1,0 +1,9 @@
+# Optional machine learning / AI dependencies for Parqcel
+numpy
+scikit-learn
+plotly
+umap-learn
+sentence-transformers
+faiss-cpu
+langchain
+transformers

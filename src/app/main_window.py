@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
     QInputDialog,
     QDialog,
     QTextEdit,
+    QDockWidget,
     QSizePolicy,
 )
 from PyQt6.QtGui import QAction, QFont
@@ -37,6 +38,10 @@ from ds.dimensionality import compute_pca, compute_umap
 import webbrowser
 import tempfile
 import numpy as np
+import ast
+from app.widgets.ai_assistant import AIAssistantWidget
+from ai.assistant import assistant_from_config
+from app.widgets.ai_settings import AISettingsDialog
 import logging
 
 logger = logging.getLogger(__name__)
@@ -208,6 +213,15 @@ class MainWindow(QMainWindow):
         dim_action = QAction("Dimensionality Reduction...", self)
         dim_action.triggered.connect(self.handle_dimensionality)
         analysis_menu.addAction(dim_action)
+        ai_action = QAction("AI Assistant...", self)
+        ai_action.triggered.connect(self.handle_ai_assistant)
+        analysis_menu.addAction(ai_action)
+
+        # Settings menu
+        settings_menu = menu_bar.addMenu("Settings")
+        ai_settings_action = QAction("AI Settings...", self)
+        ai_settings_action.triggered.connect(self.handle_ai_settings)
+        settings_menu.addAction(ai_settings_action)
 
     def open_file(self):
         file_dialog = QFileDialog(self)
@@ -762,3 +776,159 @@ class MainWindow(QMainWindow):
 
         except Exception as e:
             QMessageBox.critical(self, "Dimensionality Error", f"Failed to compute embedding: {e}")
+
+    def _safe_execute_transformation(self, code: str):
+        """Validate and safely execute a transformation code string.
+
+        Rules:
+        - Only the names `df` and `pl` are permitted as free names in the code.
+        - No import statements are allowed.
+        - Attribute access and calls are allowed only when they are on `df` or `pl`.
+
+        The code may be a single expression (preferred) or a small sequence of statements;
+        if the last node is an expression it will be captured as the result.
+
+        Returns a Polars DataFrame on success, or raises an exception.
+        """
+        import polars as pl
+
+        tree = ast.parse(code, mode="exec")
+
+        allowed_names = {"df", "pl", "True", "False", "None"}
+
+        class Validator(ast.NodeVisitor):
+            def visit_Import(self, node):
+                raise ValueError("Import statements are not allowed in assistant code")
+
+            def visit_ImportFrom(self, node):
+                raise ValueError("Import statements are not allowed in assistant code")
+
+            def visit_Name(self, node):
+                if node.id not in allowed_names:
+                    raise ValueError(f"Use of name '{node.id}' is not permitted")
+
+            def visit_Call(self, node):
+                # Ensure that function being called is an attribute access on allowed names
+                func = node.func
+                if isinstance(func, ast.Attribute):
+                    value = func.value
+                    if isinstance(value, ast.Name):
+                        if value.id not in ("df", "pl"):
+                            raise ValueError("Calls are only allowed on 'df' or 'pl' attributes")
+                elif isinstance(func, ast.Name):
+                    # direct name calls (e.g., f()) are not allowed
+                    raise ValueError("Direct function calls are not permitted; call methods on 'df' or 'pl' only")
+                self.generic_visit(node)
+
+            def visit_Attribute(self, node):
+                # allow attribute chains but ensure base is df or pl
+                cur = node
+                while isinstance(cur, ast.Attribute):
+                    cur = cur.value
+                if isinstance(cur, ast.Name):
+                    if cur.id not in ("df", "pl"):
+                        raise ValueError("Attribute access only permitted on 'df' or 'pl'")
+                self.generic_visit(node)
+
+        Validator().visit(tree)
+
+        # If last node is an Expr, replace it with assignment to capture result
+        if tree.body and isinstance(tree.body[-1], ast.Expr):
+            result_name = "__parqcel_result__"
+            expr_node = tree.body[-1]
+            assign = ast.Assign(targets=[ast.Name(id=result_name, ctx=ast.Store())], value=expr_node.value)
+            tree.body[-1] = assign
+
+        # Fix any missing lineno/col_offset information before compiling
+        tree = ast.fix_missing_locations(tree)
+        compiled = compile(tree, filename="<assistant>", mode="exec")
+
+        # Execute in restricted environment
+        globs = {"pl": pl}
+        locs = {"df": self.model.get_dataframe()}
+        exec(compiled, globs, locs)
+
+        if "__parqcel_result__" in locs:
+            res = locs["__parqcel_result__"]
+            if isinstance(res, pl.DataFrame):
+                return res
+            else:
+                raise ValueError("Result is not a Polars DataFrame")
+
+        # If result not provided, disallow applying ambiguous changes
+        raise ValueError("No result DataFrame returned by the executed code")
+
+    def handle_ai_assistant(self):
+        # Create or show an AI assistant dock widget
+        try:
+            if hasattr(self, "ai_dock") and self.ai_dock is not None:
+                self.ai_dock.show()
+                return
+
+            assistant = assistant_from_config()
+            widget = AIAssistantWidget(assistant=assistant, parent=self)
+            dock = QDockWidget("AI Assistant", self)
+            dock.setWidget(widget)
+            dock.setAllowedAreas(Qt.DockWidgetArea.RightDockWidgetArea | Qt.DockWidgetArea.LeftDockWidgetArea)
+            self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+            self.ai_dock = dock
+
+            # Connect apply_code signal to a safe confirmation flow
+            def _confirm_and_show(code: str):
+                # Show the code and offer to execute it safely on the current dataset
+                dlg = QDialog(self)
+                dlg.setWindowTitle("Suggested Code")
+                layout = QVBoxLayout(dlg)
+                te = QTextEdit()
+                te.setPlainText(code)
+                te.setReadOnly(True)
+                layout.addWidget(te)
+
+                btn_layout = QHBoxLayout()
+                close_btn = QPushButton("Close")
+                exec_btn = QPushButton("Execute on dataset")
+                btn_layout.addWidget(exec_btn)
+                btn_layout.addWidget(close_btn)
+                layout.addLayout(btn_layout)
+
+                def _on_exec():
+                    try:
+                        new_df = self._safe_execute_transformation(code)
+                        if new_df is None:
+                            QMessageBox.warning(self, "Execution", "Code did not produce a DataFrame result.")
+                        else:
+                            # apply with undo support via model.update_data
+                            self.model.update_data(new_df)
+                            self.update_statistics()
+                            QMessageBox.information(self, "Execution", "Transformation applied successfully.")
+                    except Exception as e:
+                        QMessageBox.critical(self, "Execution Error", f"Failed to execute transformation: {e}")
+                    finally:
+                        dlg.accept()
+
+                close_btn.clicked.connect(dlg.accept)
+                exec_btn.clicked.connect(_on_exec)
+                dlg.exec()
+
+                widget.apply_code.connect(_confirm_and_show)
+        except Exception as e:
+            QMessageBox.critical(self, "AI Assistant Error", f"Could not create assistant: {e}")
+
+    def handle_ai_settings(self):
+        dlg = AISettingsDialog(self)
+        # show dialog modally; after it closes, reload assistant config
+        dlg.exec()
+
+        try:
+            new_assistant = assistant_from_config()
+            # if assistant dock exists, update the widget
+            if hasattr(self, "ai_dock") and self.ai_dock is not None:
+                w = self.ai_dock.widget()
+                if isinstance(w, AIAssistantWidget):
+                    w.assistant = new_assistant
+                    try:
+                        w._append_chat("System", "Assistant configuration reloaded.")
+                    except Exception:
+                        pass
+        except Exception as e:
+            QMessageBox.warning(self, "AI Settings", f"Saved settings but failed to create assistant: {e}")

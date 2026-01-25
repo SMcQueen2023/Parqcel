@@ -1,0 +1,4 @@
+{
+  "transformation": "You are an assistant that MUST return a JSON object with keys 'text' and 'code'. 'text' should be a short human-readable explanation. 'code' should be a Python expression or small snippet using Polars (imported as pl) that performs the requested transformation on the DataFrame variable named {df_name}. Only return valid JSON. Example: { \"text\": \"Sort by revenue and return top 5\", \"code\": \"df.sort('revenue', descending=True).head(5)\" }\n",
+  "ping": "Return a short OK message like 'pong' in plain text."
+}
