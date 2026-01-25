@@ -12,7 +12,6 @@ from PyQt6.QtWidgets import (
 )
 import os
 import json
-from typing import Optional
 
 try:
     import keyring
@@ -52,6 +51,7 @@ class AISettingsDialog(QDialog):
                 if stored:
                     self.key_input.setText(stored)
             except Exception:
+                # If keyring read fails, ignore and leave input blank
                 pass
         key_layout.addWidget(self.key_input)
         layout.addLayout(key_layout)
@@ -109,14 +109,13 @@ class AISettingsDialog(QDialog):
                 except Exception:
                     QMessageBox.warning(self, "Keyring Error", "Failed to store API key in OS keyring. It will not be saved.")
             else:
-                # fallback: warn and store in plaintext in config (not recommended)
-                with open(cfg_path, "r+", encoding="utf-8") as f:
-                    data = json.load(f)
-                    data["openai_api_key"] = key
-                    f.seek(0)
-                    json.dump(data, f, indent=2)
-                    f.truncate()
-                QMessageBox.information(self, "Warning", "API key saved to config file as fallback (plaintext). Consider installing 'keyring' for secure storage.")
+                # Do NOT write API keys to plaintext config as a fallback.
+                # Instead, warn the user and ask them to install `keyring`.
+                QMessageBox.warning(
+                    self,
+                    "Keyring Missing",
+                    "OS keyring is not available. API keys will NOT be saved. Install the 'keyring' package for secure storage.",
+                )
         QMessageBox.information(self, "Saved", f"Configuration saved to {cfg_path}")
 
     def _on_test(self):
@@ -132,6 +131,7 @@ class AISettingsDialog(QDialog):
                     if stored:
                         cfg["openai_api_key"] = stored
                 except Exception:
+                    # If keyring read fails, ignore and continue without key
                     pass
 
         try:

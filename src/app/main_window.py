@@ -40,7 +40,6 @@ import tempfile
 import numpy as np
 import ast
 from app.widgets.ai_assistant import AIAssistantWidget
-from ai.assistant import assistant_from_config
 from app.widgets.ai_settings import AISettingsDialog
 import logging
 
@@ -687,6 +686,7 @@ class MainWindow(QMainWindow):
                 if color_by:
                     try:
                         color_series = df[color_by].to_list()
+                        # sample color values using same indices
                         color_vals = [color_series[i] for i in idx]
                     except Exception:
                         color_vals = None
@@ -701,17 +701,23 @@ class MainWindow(QMainWindow):
 
             # compute embedding
             if method.startswith("PCA"):
-                emb, var_ratio = compute_pca(X_vis, n_components=n_components)
+                emb, _var_ratio = compute_pca(X_vis, n_components=n_components)
             else:
                 emb = compute_umap(X_vis, n_components=n_components)
-                var_ratio = None
+                _var_ratio = None
 
-            # plot using plotly if available, fallback to saving CSV
+            # plot using plotly if available
             try:
                 import plotly.graph_objects as go
 
                 # Prepare customdata (index, color value, and up to two feature columns)
-                custom_cols = [list(range(len(emb)))]  # index
+                # Use the same sampled row indices when downsampling so hover data aligns with emb
+                if 'idx' in locals():
+                    row_idx = [int(i) for i in idx]
+                else:
+                    row_idx = list(range(X_vis.shape[0]))
+
+                custom_cols = [row_idx]
                 hover_names = ["index"]
                 if color_vals is not None:
                     custom_cols.append(color_vals)
@@ -725,6 +731,8 @@ class MainWindow(QMainWindow):
                         continue
                     try:
                         vals = df[c].to_list()
+                        if 'idx' in locals():
+                            vals = [vals[i] for i in idx]
                         custom_cols.append(vals)
                         hover_names.append(c)
                         extra_hover_cols.append(c)
@@ -764,9 +772,12 @@ class MainWindow(QMainWindow):
 
                 fig = go.Figure(data=[trace])
 
-                tmp = tempfile.NamedTemporaryFile(suffix=".html", delete=False)
-                fig.write_html(tmp.name)
-                webbrowser.open(tmp.name)
+                # Create temporary HTML file and close it before writing to avoid Windows locking
+                with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as tmp:
+                    tmp_path = tmp.name
+
+                fig.write_html(tmp_path)
+                webbrowser.open(tmp_path)
             except Exception as e:
                 QMessageBox.information(
                     self,
@@ -865,6 +876,9 @@ class MainWindow(QMainWindow):
                 self.ai_dock.show()
                 return
 
+            # import factory lazily to avoid heavy ML/backends imports during module import
+            from ai.assistant import assistant_from_config
+
             assistant = assistant_from_config()
             widget = AIAssistantWidget(assistant=assistant, parent=self)
             dock = QDockWidget("AI Assistant", self)
@@ -920,6 +934,8 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
         try:
+            from ai.assistant import assistant_from_config
+
             new_assistant = assistant_from_config()
             # if assistant dock exists, update the widget
             if hasattr(self, "ai_dock") and self.ai_dock is not None:
@@ -929,6 +945,7 @@ class MainWindow(QMainWindow):
                     try:
                         w._append_chat("System", "Assistant configuration reloaded.")
                     except Exception:
-                        pass
+                        # Non-critical: failure to append a system message should not block settings update
+                        logger.exception("Failed to append system message after reloading AI assistant settings.")
         except Exception as e:
             QMessageBox.warning(self, "AI Settings", f"Saved settings but failed to create assistant: {e}")

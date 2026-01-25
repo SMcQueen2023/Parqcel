@@ -75,7 +75,9 @@ class EmbeddingStore:
     def search(self, query_vec: np.ndarray, top_k: int = 5) -> List[Tuple[str, float]]:
         q = np.asarray(query_vec).reshape(1, -1).astype("float32")
         # normalize
-        q = q / np.linalg.norm(q, axis=1, keepdims=True)
+        q_norms = np.linalg.norm(q, axis=1, keepdims=True)
+        q_norms[q_norms == 0] = 1.0
+        q = q / q_norms
         if self._faiss_index is not None:
             D, I = self._faiss_index.search(q, top_k)
             results = []
@@ -88,7 +90,9 @@ class EmbeddingStore:
         if self.vectors is None:
             return []
         vecs = np.asarray(self.vectors)
-        vecs_norm = vecs / np.linalg.norm(vecs, axis=1, keepdims=True)
+        vecs_norms = np.linalg.norm(vecs, axis=1, keepdims=True)
+        vecs_norms[vecs_norms == 0] = 1.0
+        vecs_norm = vecs / vecs_norms
         q_norm = q[0]
         sims = vecs_norm.dot(q_norm)
         top_idx = np.argsort(-sims)[:top_k]
