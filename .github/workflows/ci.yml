@@ -5,7 +5,6 @@ on:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
-
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -14,7 +13,7 @@ jobs:
       - name: Install system dependencies for PyQt6
         run: |
           sudo apt-get update
-          sudo apt-get install -y libegl1 libgl1-mesa-dri libgl1-mesa-glx
+          sudo apt-get install -y libegl1 libgl1-mesa-dri
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
