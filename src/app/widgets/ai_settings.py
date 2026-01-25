@@ -34,42 +34,38 @@ class AISettingsDialog(QDialog):
 
         layout = QVBoxLayout(self)
 
-        # import backend factory lazily to avoid heavy ML imports during module import
-        try:
-            from ai.backends import create_backend
+        # Provider selector
+        prov_layout = QHBoxLayout()
+        prov_layout.addWidget(QLabel("Provider:"))
+        self.provider = QComboBox()
+        self.provider.addItems(["dummy", "openai", "hf"]) 
+        self.provider.setCurrentText(cfg.get("provider", "dummy"))
+        prov_layout.addWidget(self.provider)
+        layout.addLayout(prov_layout)
 
-            backend = create_backend(cfg)
-        except Exception as e:
-            QMessageBox.critical(self, "Test Failed", f"Could not create backend: {e}")
-            return
-
-        # attempt a small ping; disable button while running and ensure re-enabled
-        self.test_btn.setEnabled(False)
+        # OpenAI key entry
+        key_layout = QHBoxLayout()
+        key_layout.addWidget(QLabel("OpenAI API Key:"))
+        self.key_input = QLineEdit()
         try:
-            import time
-            start = time.perf_counter()
-            ok = False
-            if hasattr(backend, "test_connection"):
-                ok = backend.test_connection()
-            else:
-                # fallback: call generate_text with a ping prompt
-                resp = backend.generate_text("ping")
-                ok = resp is not None
-            elapsed = time.perf_counter() - start
-            if ok:
-                QMessageBox.information(self, "Test Succeeded", f"Connection OK (latency {elapsed:.2f}s)")
-            else:
-                QMessageBox.warning(self, "Test Result", "Backend did not indicate success")
-        except Exception as e:
-            QMessageBox.critical(self, "Test Failed", f"Error during test: {e}")
-        finally:
-            self.test_btn.setEnabled(True)
+            if keyring is not None:
+                stored = keyring.get_password("parqcel", "openai_api_key")
+                if stored:
+                    self.key_input.setText(stored)
+        except Exception:
+            logger.exception("Failed to read API key from keyring")
+        self.key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        key_layout.addWidget(self.key_input)
+        layout.addLayout(key_layout)
+
+        if keyring is not None:
             keyring_msg = "Keyring available: keys will be stored securely."
         else:
             keyring_msg = "Keyring unavailable: API keys will not be saved; install 'keyring' to persist."
         self.keyring_label = QLabel(keyring_msg)
         layout.addWidget(self.keyring_label)
 
+        # OpenAI base
         base_layout = QHBoxLayout()
         base_layout.addWidget(QLabel("OpenAI API Base (optional):"))
         self.base_input = QLineEdit()
@@ -77,6 +73,7 @@ class AISettingsDialog(QDialog):
         base_layout.addWidget(self.base_input)
         layout.addLayout(base_layout)
 
+        # HF model
         hf_layout = QHBoxLayout()
         hf_layout.addWidget(QLabel("HF Model (hf provider):"))
         self.hf_input = QLineEdit()
@@ -85,6 +82,7 @@ class AISettingsDialog(QDialog):
         hf_layout.addWidget(self.hf_input)
         layout.addLayout(hf_layout)
 
+        # Buttons
         btn_layout = QHBoxLayout()
         self.test_btn = QPushButton("Test Connection")
         self.save_btn = QPushButton("Save")
