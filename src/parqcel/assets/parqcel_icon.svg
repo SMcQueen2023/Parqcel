@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none">
+  <rect x="16" y="16" width="480" height="480" rx="64" ry="64" fill="#ffffff" stroke="#1c2c46" stroke-width="24" />
+  <!-- Leaf block -->
+  <rect x="44" y="44" width="280" height="260" rx="24" ry="24" fill="#66c89b" stroke="#1c2c46" stroke-width="16" />
+  <path d="M84 276 L84 140 L324 140" stroke="#3a9164" stroke-width="20" stroke-linecap="round" />
+  <path d="M84 200 L200 84" stroke="#3a9164" stroke-width="20" stroke-linecap="round" />
+  <path d="M160 276 L324 112" stroke="#3a9164" stroke-width="20" stroke-linecap="round" />
+  <!-- Diamond tile block -->
+  <g transform="translate(260 230) rotate(20 90 90)">
+    <rect x="10" y="10" width="180" height="180" rx="20" ry="20" fill="#7b6bce" stroke="#1c2c46" stroke-width="16" />
+    <line x1="10" y1="100" x2="190" y2="100" stroke="#1c2c46" stroke-width="16" />
+    <line x1="100" y1="10" x2="100" y2="190" stroke="#1c2c46" stroke-width="16" />
+  </g>
+  <!-- Star highlight -->
+  <path d="M392 70 C400 90 416 100 436 104 C416 108 400 118 392 138 C384 118 368 108 348 104 C368 100 384 90 392 70 Z" fill="#45c3d9" />
+</svg>

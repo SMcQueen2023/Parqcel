@@ -12,11 +12,14 @@ from PyQt6.QtWidgets import (
 )
 import os
 import json
+import logging
 
 try:
     import keyring
 except Exception:
     keyring = None
+logger = logging.getLogger(__name__)
+
 
 from ai.config import load_config
 
@@ -44,6 +47,7 @@ class AISettingsDialog(QDialog):
         key_layout = QHBoxLayout()
         key_layout.addWidget(QLabel("OpenAI API Key:"))
         self.key_input = QLineEdit()
+        self.key_input.setEchoMode(QLineEdit.EchoMode.Password)
         # try to read from keyring
         if keyring is not None:
             try:
@@ -52,9 +56,16 @@ class AISettingsDialog(QDialog):
                     self.key_input.setText(stored)
             except Exception:
                 # If keyring read fails, ignore and leave input blank
-                pass
+                logger.exception("Failed to read API key from keyring")
         key_layout.addWidget(self.key_input)
         layout.addLayout(key_layout)
+
+        if keyring is not None:
+            keyring_msg = "Keyring available: keys will be stored securely."
+        else:
+            keyring_msg = "Keyring unavailable: API keys will not be saved; install 'keyring' to persist."
+        self.keyring_label = QLabel(keyring_msg)
+        layout.addWidget(self.keyring_label)
 
         base_layout = QHBoxLayout()
         base_layout.addWidget(QLabel("OpenAI API Base (optional):"))
@@ -66,6 +77,7 @@ class AISettingsDialog(QDialog):
         hf_layout = QHBoxLayout()
         hf_layout.addWidget(QLabel("HF Model (hf provider):"))
         self.hf_input = QLineEdit()
+        self.hf_input.setPlaceholderText("gpt2")
         self.hf_input.setText(cfg.get("hf_model", ""))
         hf_layout.addWidget(self.hf_input)
         layout.addLayout(hf_layout)
@@ -132,9 +144,10 @@ class AISettingsDialog(QDialog):
                         cfg["openai_api_key"] = stored
                 except Exception:
                     # If keyring read fails, ignore and continue without key
-                    pass
+                    logger.exception("Failed to read API key from keyring during test")
 
         try:
+            self.test_btn.setEnabled(False)
             # import backend factory lazily to avoid heavy ML imports during module import
             from ai.backends import create_backend
 
@@ -161,3 +174,5 @@ class AISettingsDialog(QDialog):
                 QMessageBox.warning(self, "Test Result", "Backend did not indicate success")
         except Exception as e:
             QMessageBox.critical(self, "Test Failed", f"Error during test: {e}")
+        finally:
+            self.test_btn.setEnabled(True)
