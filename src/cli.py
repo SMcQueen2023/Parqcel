@@ -10,11 +10,13 @@ from __future__ import annotations
 import argparse
 import polars as pl
 
-from ds.featurize import generate_feature_matrix, add_features_to_df
-from ds.dimensionality import compute_pca
-
 
 def cmd_featurize(args):
+    try:
+        from ds.featurize import generate_feature_matrix, add_features_to_df
+    except ImportError as exc:  # pragma: no cover - optional extra
+        raise SystemExit("Install with 'pip install parqcel[ml]' to use featurize") from exc
+
     df = pl.read_parquet(args.input) if args.input.endswith('.parquet') else pl.read_csv(args.input)
     X, names = generate_feature_matrix(df)
     new_df = add_features_to_df(df, X, names)
@@ -25,6 +27,12 @@ def cmd_featurize(args):
 
 
 def cmd_pca(args):
+    try:
+        from ds.featurize import generate_feature_matrix
+        from ds.dimensionality import compute_pca
+    except ImportError as exc:  # pragma: no cover - optional extra
+        raise SystemExit("Install with 'pip install parqcel[ml]' to use pca") from exc
+
     df = pl.read_parquet(args.input) if args.input.endswith('.parquet') else pl.read_csv(args.input)
     X, names = generate_feature_matrix(df)
     emb, var = compute_pca(X, n_components=args.components)

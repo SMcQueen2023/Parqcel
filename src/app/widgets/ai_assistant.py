@@ -37,13 +37,14 @@ class AIAssistantWidget(QWidget):
         self.chat.setReadOnly(True)
         self.layout.addWidget(self.chat)
 
-        self.suggestions_label = QLabel("Suggested actions:")
+        self.suggestions_label = QLabel("Suggested code (click to select):")
         self.layout.addWidget(self.suggestions_label)
         self.suggestions = QListWidget()
         self.layout.addWidget(self.suggestions)
 
         bottom = QHBoxLayout()
         self.input = QLineEdit()
+        self.input.setPlaceholderText("Ask for a transformation or insight...")
         self.send_btn = QPushButton("Ask")
         self.apply_btn = QPushButton("Apply Suggestion")
         self.apply_btn.setEnabled(False)
@@ -55,6 +56,7 @@ class AIAssistantWidget(QWidget):
         # Signals
         self.send_btn.clicked.connect(self._on_send)
         self.apply_btn.clicked.connect(self._on_apply)
+        self.suggestions.itemSelectionChanged.connect(self._on_select)
 
         # Internal last code
         self._last_code: Optional[str] = None
@@ -86,6 +88,7 @@ class AIAssistantWidget(QWidget):
             # show code as a suggestion and enable apply
             self.suggestions.clear()
             self.suggestions.addItem(code)
+            self.suggestions.setCurrentRow(0)
             self._last_code = code
             self.apply_btn.setEnabled(True)
         else:
@@ -102,3 +105,12 @@ class AIAssistantWidget(QWidget):
             return
         # Emit code for the main window to handle (confirmation & execution)
         self.apply_code.emit(self._last_code)
+
+    def _on_select(self) -> None:
+        items = self.suggestions.selectedItems()
+        if not items:
+            self._last_code = None
+            self.apply_btn.setEnabled(False)
+            return
+        self._last_code = items[0].text()
+        self.apply_btn.setEnabled(True)

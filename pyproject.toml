@@ -35,8 +35,46 @@ dependencies = [
   "PyQt6==6.9.0"
 ]
 
+[project.optional-dependencies]
+ml = [
+  "numpy",
+  "scikit-learn",
+  "plotly",
+  "umap-learn",
+]
+ai = [
+  "numpy",
+  "scikit-learn",
+  "plotly",
+  "umap-learn",
+  "sentence-transformers",
+  "faiss-cpu",
+  "langchain",
+  "transformers",
+  "openai>=0.28,<1",
+  "keyring",
+]
+dev = [
+  "pytest",
+  "pytest-qt",
+  "black",
+  "ruff",
+  "mypy",
+]
+
 [project.scripts]
-parqcel = "main:main"
+parqcel = "parqcel.__main__:main"
+parqcel-cli = "cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
+include-package-data = true
+py-modules = ["main", "logging_config", "cli"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+exclude = ["tests*"]
+
+[tool.setuptools.package-data]
+"ai" = ["prompts.json"]
+"parqcel.assets" = ["parqcel_icon.svg", "parqcel_icon.png", "parqcel_icon.ico"]

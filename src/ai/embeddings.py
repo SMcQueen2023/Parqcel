@@ -3,27 +3,42 @@ from __future__ import annotations
 from typing import List, Optional, Tuple
 import numpy as np
 
-try:
-    from sentence_transformers import SentenceTransformer
-except Exception:  # pragma: no cover - optional runtime dependency
-    SentenceTransformer = None
 
-try:
-    import faiss
-except Exception:
-    faiss = None
+def _lazy_sentence_transformers():
+    try:
+        from sentence_transformers import SentenceTransformer  # type: ignore
+    except Exception:
+        return None
+    return SentenceTransformer
 
-from sklearn.feature_extraction.text import TfidfVectorizer
+
+def _lazy_faiss():
+    try:
+        import faiss  # type: ignore
+    except Exception:
+        return None
+    return faiss
+
+
+def _lazy_tfidf():
+    try:
+        from sklearn.feature_extraction.text import TfidfVectorizer  # type: ignore
+    except Exception as exc:
+        raise ImportError("scikit-learn is required for TF-IDF fallback") from exc
+    return TfidfVectorizer
 
 
 class Embedder:
     def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
         self.model_name = model_name
-        if SentenceTransformer is not None:
-            self.model = SentenceTransformer(model_name)
+        ST = _lazy_sentence_transformers()
+        if ST is not None:
+            self.model = ST(model_name)
+            self._tfidf = None
         else:
+            TFIDF = _lazy_tfidf()
             self.model = None
-            self._tfidf = TfidfVectorizer(max_features=4096)
+            self._tfidf = TFIDF(max_features=4096)
             self._tfidf_fitted = False
 
     def encode(self, texts: List[str]) -> np.ndarray:
@@ -62,6 +77,7 @@ class EmbeddingStore:
         self._build_faiss()
 
     def _build_faiss(self):
+        faiss = _lazy_faiss()
         if faiss is None:
             self._faiss_index = None
             return
