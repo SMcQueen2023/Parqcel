@@ -24,5 +24,6 @@ jobs:
           # Install NumPy early to satisfy any build-time imports during project install
           python -m pip install numpy
           python -m pip install .[dev]
+          python -m pip install scikit-learn
       - name: Run tests
         run: pytest -q
