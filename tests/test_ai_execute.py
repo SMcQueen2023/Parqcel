@@ -2,7 +2,7 @@ import polars as pl
 from app.main_window import MainWindow
 
 
-def test_safe_execute_allowed():
+def test_safe_execute_allowed(qapp):
     # create a dummy MainWindow and small dataframe
     mw = MainWindow()
     df = pl.DataFrame({"a": [1, 2, 3], "b": [10, 20, 30]})
@@ -14,7 +14,7 @@ def test_safe_execute_allowed():
     assert res.height == 2
 
 
-def test_safe_execute_disallowed_import():
+def test_safe_execute_disallowed_import(qapp):
     mw = MainWindow()
     df = pl.DataFrame({"a": [1]})
     mw.model = type("M", (), {})()

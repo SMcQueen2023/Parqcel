@@ -75,6 +75,10 @@ class AIAssistantWidget(QWidget):
         except Exception as e:
             text = f"(assistant error) {e}"
             code = ""
+            # clear any previous suggestions to avoid stale apply
+            self.suggestions.clear()
+            self._last_code = None
+            self.apply_btn.setEnabled(False)
 
         if text:
             self._append_chat("Assistant", text)
@@ -84,6 +88,12 @@ class AIAssistantWidget(QWidget):
             self.suggestions.addItem(code)
             self._last_code = code
             self.apply_btn.setEnabled(True)
+        else:
+            # no code returned -> ensure apply is disabled
+            self.apply_btn.setEnabled(False)
+            if not text:
+                # ensure no stale code is kept
+                self._last_code = None
 
         self.input.clear()
 

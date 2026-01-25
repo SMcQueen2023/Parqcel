@@ -8,7 +8,6 @@ Commands:
 from __future__ import annotations
 
 import argparse
-import sys
 import polars as pl
 
 from ds.featurize import generate_feature_matrix, add_features_to_df

@@ -945,6 +945,7 @@ class MainWindow(QMainWindow):
                     try:
                         w._append_chat("System", "Assistant configuration reloaded.")
                     except Exception:
-                        pass
+                        # Non-critical: failure to append a system message should not block settings update
+                        logger.exception("Failed to append system message after reloading AI assistant settings.")
         except Exception as e:
             QMessageBox.warning(self, "AI Settings", f"Saved settings but failed to create assistant: {e}")

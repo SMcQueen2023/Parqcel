@@ -1,5 +1,3 @@
-import os
-import pytest
 from ai.assistant import assistant_from_config
 from PyQt6.QtCore import Qt
 
@@ -29,4 +27,4 @@ def test_ai_widget_interaction(qtbot):
     qtbot.mouseClick(widget.send_btn, Qt.MouseButton.LeftButton)
 
     # The widget should populate suggestions
-    assert widget.suggestions.count() >= 0
+    assert widget.suggestions.count() > 0
