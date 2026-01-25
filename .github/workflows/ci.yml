@@ -14,16 +14,16 @@ jobs:
       - name: Install system dependencies for PyQt6
         run: |
           sudo apt-get update
-          sudo apt-get install -y libegl1
+          sudo apt-get install -y libegl1 libgl1-mesa-dri libgl1-mesa-glx
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install package with dev extras
+      - name: Install Python deps and project (dev extras)
         run: |
           python -m pip install --upgrade pip
-          python -m pip install .[dev]
-          # NumPy is required by DS features and tests; install explicitly for CI
+          # Install NumPy early to satisfy any build-time imports during project install
           python -m pip install numpy
+          python -m pip install .[dev]
       - name: Run tests
         run: pytest -q

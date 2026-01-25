@@ -60,7 +60,7 @@ begin
   // Last resort: try the py launcher in System32, otherwise python.exe on PATH
   if FileExists(ExpandConstant('{sys}\py.exe')) then
   begin
-    Result := 'py'
+    Result := 'py';
     exit;
   end;
   Result := 'python.exe';
