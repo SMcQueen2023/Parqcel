@@ -283,7 +283,7 @@ tests/
 ├── test_validator.py      # AI code validation
 ├── test_featurize.py      # Feature engineering
 ├── test_parsers.py        # Data type conversion
-├── test_filters.py        # Filtering logic
+├── test_filtering.py      # Filtering logic
 └── test_stats.py          # Statistics computation
 ```
 
