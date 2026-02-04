@@ -202,7 +202,7 @@ export PARQCEL_AI_PROVIDER=openai
 
 # OpenAI configuration
 export PARQCEL_OPENAI_API_KEY=sk-...
-export PARQCEL_OPENAI_API_BASE=https://api.openai.com/v1  # optional
+export PARQCEL_OPENAI_API_BASE=https://api.openai.com/v1  # optional: for proxies or custom endpoints
 
 # HuggingFace configuration
 export PARQCEL_HF_MODEL=gpt2  # or any HF model name
@@ -458,8 +458,8 @@ Parqcel is optimized for real-world datasets, but performance depends on file si
 | File Size | Memory Usage | Load Time | Notes |
 |-----------|--------------|-----------|-------|
 | < 100 MB  | ~2x file size | < 1s | Excellent performance |
-| 100MB-1GB | ~3x file size | 1-5s | Good, use pagination |
-| 1-10 GB   | ~3-5x file size | 5-30s | Recommended: filter early |
+| 100 MB - 1 GB | ~3x file size | 1-5s | Good, use pagination |
+| 1 - 10 GB   | ~3-5x file size | 5-30s | Recommended: filter early |
 | > 10 GB   | Variable | 30s+ | May require optimization |
 
 **Performance Tips**:
