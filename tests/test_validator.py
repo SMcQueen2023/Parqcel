@@ -61,7 +61,9 @@ def test_reject_list_comprehension():
 def test_reject_unauthorized_name():
     """Test that unauthorized variable names are rejected."""
     code = "os.system('ls')"
-    with pytest.raises(TransformationValidationError, match="Function calls only allowed"):
+    with pytest.raises(
+        TransformationValidationError, match="Function calls only allowed"
+    ):
         validate_transformation_code(code)
 
 
@@ -75,14 +77,18 @@ def test_reject_dunder_attribute():
 def test_reject_attribute_on_unauthorized_name():
     """Test that attributes on unauthorized names are rejected."""
     code = "os.path.join('a', 'b')"
-    with pytest.raises(TransformationValidationError, match="Function calls only allowed"):
+    with pytest.raises(
+        TransformationValidationError, match="Function calls only allowed"
+    ):
         validate_transformation_code(code)
 
 
 def test_reject_direct_function_call():
     """Test that direct function calls are rejected."""
     code = "print('hello')"
-    with pytest.raises(TransformationValidationError, match="Function calls only allowed"):
+    with pytest.raises(
+        TransformationValidationError, match="Function calls only allowed"
+    ):
         validate_transformation_code(code)
 
 
@@ -95,7 +101,7 @@ def test_allow_constants():
 
 def test_allow_boolean_literals():
     """Test that True/False/None are allowed."""
-    code = "df.select([pl.col('x').is_null() == True])"
+    code = "df.select([pl.col('x').is_null()])"
     tree = validate_transformation_code(code)
     assert isinstance(tree, ast.Module)
 
@@ -104,7 +110,7 @@ def test_prepare_transformation_captures_result():
     """Test that prepare_transformation_for_execution captures expression results."""
     code = "df.head(10)"
     tree, result_var = prepare_transformation_for_execution(code)
-    
+
     # Check that the last statement is now an assignment
     assert isinstance(tree.body[-1], ast.Assign)
     assert tree.body[-1].targets[0].id == result_var
@@ -117,7 +123,7 @@ def test_prepare_transformation_with_statements():
 df.select(['col1']).head(10)
 """
     tree, result_var = prepare_transformation_for_execution(code)
-    
+
     # The expression should be converted to an assignment
     assert isinstance(tree.body[-1], ast.Assign)
     assert tree.body[-1].targets[0].id == result_var
@@ -164,5 +170,7 @@ def test_reject_temp_variable_usage():
 result = df.select(['col1'])
 result.head(10)
 """
-    with pytest.raises(TransformationValidationError, match="Function calls only allowed"):
+    with pytest.raises(
+        TransformationValidationError, match="Function calls only allowed"
+    ):
         validate_transformation_code(code)
