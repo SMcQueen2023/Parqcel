@@ -205,7 +205,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Refactored code into separate files
   - Better project structure
 
-## Pre-release - 2025-05-02 to 2025-04-29
+## Pre-release - 2025-04-29 to 2025-05-02
 
 ### Added
 - Column filters for text and numeric columns (PR #15)
