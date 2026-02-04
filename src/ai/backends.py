@@ -52,14 +52,26 @@ def _parse_transformation_response(resp_text: str) -> Dict[str, str]:
 
 
 def _load_prompt(template_name: str, **kwargs) -> str:
+    """Load a prompt template from prompts.json with fallback to minimal templates.
+    
+    Args:
+        template_name: Name of the template to load
+        **kwargs: Template formatting arguments
+        
+    Returns:
+        Formatted prompt string
+    """
     try:
         data = resources.files("ai").joinpath("prompts.json").read_text(encoding="utf-8")
         prompts = json.loads(data)
         template = prompts.get(template_name)
         if template:
             return template.format(**kwargs)
-    except Exception:
-        pass
+    except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
+        logger.debug("Could not load prompt template '%s': %s. Using fallback.", template_name, e)
+    except Exception as e:
+        logger.warning("Unexpected error loading prompt template '%s': %s. Using fallback.", template_name, e)
+    
     # fallback minimal template
     if template_name == "transformation":
         return (
@@ -105,20 +117,37 @@ class OpenAIBackend:
         self._openai = openai
 
     def generate_text(self, prompt: str) -> str:
-        # Use Chat Completions if available, fallback to Completion
+        """Generate text using OpenAI API.
+        
+        Tries ChatCompletion first, falls back to Completion if needed.
+        
+        Args:
+            prompt: The prompt text
+            
+        Returns:
+            Generated text response
+            
+        Raises:
+            Exception: If both API calls fail
+        """
         openai = self._openai
         try:
             resp = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo", messages=[{"role": "user", "content": prompt}], max_tokens=256
             )
             return resp.choices[0].message.content.strip()
-        except Exception:
-            try:
-                resp = openai.Completion.create(model="text-davinci-003", prompt=prompt, max_tokens=256)
-                return resp.choices[0].text.strip()
-            except Exception as e:
-                logger.exception("OpenAI generation failed: %s", e)
-                raise
+        except AttributeError:
+            # ChatCompletion not available, try Completion
+            logger.debug("ChatCompletion not available, falling back to Completion API")
+        except Exception as e:
+            logger.warning("ChatCompletion failed: %s, falling back to Completion API", e)
+        
+        try:
+            resp = openai.Completion.create(model="text-davinci-003", prompt=prompt, max_tokens=256)
+            return resp.choices[0].text.strip()
+        except Exception as e:
+            logger.exception("OpenAI Completion API also failed: %s", e)
+            raise RuntimeError(f"OpenAI text generation failed: {e}") from e
 
     def generate_transformation(self, prompt: str, df_name: str = "df") -> Dict[str, Any]:
         # Ask the LLM to produce a Polars snippet. The caller must review/apply.

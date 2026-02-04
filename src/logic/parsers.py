@@ -109,6 +109,116 @@ def parse_list_of_datetimes(values: Iterable[Any]) -> List[Optional[datetime.dat
     return [parse_single_datetime(v) for v in values]
 
 
+def _extract_sample_values(series: "pl.Series", sample_size: int = 500) -> List[str]:
+    """Extract a sample of non-empty string values from a series for format detection.
+    
+    Args:
+        series: The Polars series to sample from
+        sample_size: Maximum number of samples to collect
+        
+    Returns:
+        List of non-empty string values
+    """
+    sample_vals: List[str] = []
+    try:
+        sampled = series.head(sample_size)
+        for v in sampled.to_list():
+            if v is None:
+                continue
+            s = str(v).strip()
+            if s:
+                sample_vals.append(s)
+            if len(sample_vals) >= sample_size:
+                break
+    except Exception:
+        # Fallback iterator: try iterating the series if head()/to_list() failed
+        logger.debug("Head-based sampling failed; falling back to iterator sampling", exc_info=True)
+        for v in series:
+            if v is None:
+                continue
+            s = str(v).strip()
+            if s:
+                sample_vals.append(s)
+            if len(sample_vals) >= sample_size:
+                break
+    
+    return sample_vals
+
+
+def _try_vectorized_datetime_parse(
+    series: "pl.Series", fmt: str, strict: bool = False
+) -> Optional["pl.Series"]:
+    """Try to parse a series using a specific datetime format.
+    
+    Args:
+        series: The series to parse
+        fmt: The datetime format string
+        strict: Whether to use strict parsing
+        
+    Returns:
+        Parsed series if successful, None otherwise
+    """
+    try:
+        # Convert Python format to Polars format if needed
+        polars_fmt = fmt.replace(".%f", "%.f") if "%.f" not in fmt else fmt
+        out = series.str.strptime(pl.Datetime, polars_fmt, strict=strict)
+        return out
+    except Exception:
+        logger.debug("Vectorized parse failed for format: %s", fmt, exc_info=False)
+        return None
+
+
+def _try_vectorized_date_parse(
+    series: "pl.Series", fmt: str, strict: bool = False
+) -> Optional["pl.Series"]:
+    """Try to parse a series as dates and convert to datetime at midnight.
+    
+    Args:
+        series: The series to parse
+        fmt: The date format string
+        strict: Whether to use strict parsing
+        
+    Returns:
+        Parsed series (as Datetime) if successful, None otherwise
+    """
+    try:
+        date_out = series.str.strptime(pl.Date, fmt, strict=strict)
+        # Cast Date -> Datetime (midnight)
+        return date_out.cast(pl.Datetime)
+    except Exception:
+        logger.debug("Vectorized date parse failed for format: %s", fmt, exc_info=False)
+        return None
+
+
+def _apply_python_fallback_parsing(
+    series: "pl.Series", partially_parsed: Optional["pl.Series"]
+) -> List[Optional[datetime.datetime]]:
+    """Apply Python-based per-value parsing for remaining nulls.
+    
+    Args:
+        series: Original series
+        partially_parsed: Series with some values already parsed (or None)
+        
+    Returns:
+        List of parsed datetime values
+    """
+    if partially_parsed is None:
+        # Parse all values
+        return [parse_single_datetime(v) for v in series.to_list()]
+    
+    # Parse only the null values
+    parsed_vals = partially_parsed.to_list()
+    null_mask = partially_parsed.is_null().to_list()
+    for i, is_null in enumerate(null_mask):
+        if is_null:
+            try:
+                parsed_vals[i] = parse_single_datetime(series[i])
+            except Exception:
+                logger.debug("Python fallback parsing failed for index %d", i, exc_info=True)
+    
+    return parsed_vals
+
+
 def convert_series_to_datetime(series: "pl.Series", allow_fallback: bool = True) -> "pl.Series":
     """Robustly convert a Utf8/text `pl.Series` to `pl.Datetime`.
 
@@ -117,6 +227,13 @@ def convert_series_to_datetime(series: "pl.Series", allow_fallback: bool = True)
     - Attempt vectorized parsing using detected datetime formats.
     - If vectorized parse leaves some nulls, fall back to pure-Python per-value parsing for those entries.
     - Return a `pl.Series` with `pl.Datetime` dtype (or the best-effort series if casting fails).
+    
+    Args:
+        series: Series to convert
+        allow_fallback: Whether to allow Python fallback for unparseable values
+        
+    Returns:
+        Series with Datetime dtype
     """
     if series is None:
         return series
@@ -126,131 +243,80 @@ def convert_series_to_datetime(series: "pl.Series", allow_fallback: bool = True)
         if series.dtype == pl.Datetime:
             return series
 
-        # Prepare sample for format detection (first 500 non-empty values)
-        sample_vals: List[str] = []
-        try:
-            sampled = series.head(500)
-            for v in sampled.to_list():
-                if v is None:
-                    continue
-                s = str(v).strip()
-                if s:
-                    sample_vals.append(s)
-                if len(sample_vals) >= 500:
-                    break
-        except Exception:
-            # Fallback iterator: try iterating the series if head()/to_list() failed
-            logger.debug("Head-based sampling failed; falling back to iterator sampling", exc_info=True)
-            for v in series:
-                if v is None:
-                    continue
-                s = str(v).strip()
-                if s:
-                    sample_vals.append(s)
-                if len(sample_vals) >= 500:
-                    break
+        name = series.name if series.name else "__col"
+        
+        # Extract sample for format detection
+        sample_vals = _extract_sample_values(series)
 
-        # Use Python-compatible formats for sample detection
+        # Detect best formats from samples
         best_dt_fmt = (
             detect_format_for_samples(sample_vals, PY_DATETIME_FORMATS)
             if sample_vals
             else None
         )
-        # Also attempt to detect date-only formats (e.g., "%Y-%m-%d") and treat them as midnight datetimes
         best_date_fmt = (
             detect_format_for_samples(sample_vals, PY_DATE_FORMATS) if sample_vals else None
         )
-        name = series.name if series.name else "__col"
 
-        # 1) If we detected a clear format, try a single vectorized parse using Series.str.strptime
+        # 1) Try detected datetime format (fast path if successful)
         if best_dt_fmt:
-            try:
-                # For Polars parsing, use chrono/Polars format strings
-                # convert the python-format to the closest Polars format if needed
-                polars_fmt = (
-                    best_dt_fmt.replace(".%f", "%.f")
-                    if "%.f" not in best_dt_fmt
-                    else best_dt_fmt
+            out = _try_vectorized_datetime_parse(series, best_dt_fmt, strict=False)
+            if out is not None and int(out.is_null().sum()) == 0:
+                return out.cast(pl.Datetime)
+            if not allow_fallback:
+                raise ValueError(
+                    "Vectorized parse produced nulls and fallback is disabled"
                 )
-                out = series.str.strptime(pl.Datetime, polars_fmt, strict=False)
-                # If vectorized parse succeeded for all rows, return immediately (fast-path)
-                if int(out.is_null().sum()) == 0:
-                    return out.cast(pl.Datetime)
-                # If fallback is disabled, bail out early instead of doing per-row Python parsing
-                if not allow_fallback:
-                    raise ValueError(
-                        "Vectorized parse produced nulls and fallback is disabled"
-                    )
-            except Exception:
-                logger.debug("Vectorized parse using detected datetime format failed: %s", best_dt_fmt, exc_info=True)
 
-        # 1b) If we detected a clear date-only format, parse as Date then cast to Datetime at midnight
+        # 2) Try detected date-only format
         if best_date_fmt:
-            try:
-                # best_date_fmt is python-style; convert fractional if needed (no fractional for dates)
-                date_out = series.str.strptime(pl.Date, best_date_fmt, strict=False)
-                if int(date_out.is_null().sum()) == 0:
-                    # cast Date -> Datetime (midnight) and return
-                    return date_out.cast(pl.Datetime)
-                if not allow_fallback:
-                    raise ValueError("Date-format vectorized parse produced nulls and fallback is disabled")
-            except Exception:
-                logger.debug("Vectorized parse using detected date-only format failed: %s", best_date_fmt, exc_info=True)
+            out = _try_vectorized_date_parse(series, best_date_fmt, strict=False)
+            if out is not None and int(out.is_null().sum()) == 0:
+                return out
+            if not allow_fallback:
+                raise ValueError("Date-format vectorized parse produced nulls and fallback is disabled")
 
-        # 2) Try safe (4-digit year) formats first to avoid ambiguous %y parsing
+        # 3) Try safe formats (4-digit year) first to avoid ambiguous %y parsing
         safe_formats = [f for f in DATETIME_FORMATS if "%y" not in f]
         formats_to_try = safe_formats if safe_formats else DATETIME_FORMATS
 
         parsed = None
         for fmt in formats_to_try:
-            try:
-                piece = series.str.strptime(pl.Datetime, fmt, strict=False)
-            except Exception:
-                logger.debug("Vectorized parse failed for format: %s", fmt, exc_info=False)
-                continue
-            parsed = piece if parsed is None else parsed.fill_null(piece)
-            if int(parsed.is_null().sum()) == 0:
-                return parsed.cast(pl.Datetime)
-
-        # 3) If still have nulls, try remaining formats (including %y) if we didn't try them
-        if safe_formats and len(safe_formats) != len(DATETIME_FORMATS):
-            for fmt in DATETIME_FORMATS:
-                if fmt in safe_formats:
-                    continue
-                try:
-                    piece = series.str.strptime(pl.Datetime, fmt, strict=False)
-                except Exception:
-                    logger.debug("Vectorized parse failed for (fallback) format: %s", fmt, exc_info=False)
-                    continue
+            piece = _try_vectorized_datetime_parse(series, fmt, strict=False)
+            if piece is not None:
                 parsed = piece if parsed is None else parsed.fill_null(piece)
                 if int(parsed.is_null().sum()) == 0:
                     return parsed.cast(pl.Datetime)
 
-        # If fallback is disabled, and we still have nulls now, raise instead of doing Python fallback
+        # 4) Try remaining formats (including %y) if not tried yet
+        if safe_formats and len(safe_formats) != len(DATETIME_FORMATS):
+            for fmt in DATETIME_FORMATS:
+                if fmt in safe_formats:
+                    continue
+                piece = _try_vectorized_datetime_parse(series, fmt, strict=False)
+                if piece is not None:
+                    parsed = piece if parsed is None else parsed.fill_null(piece)
+                    if int(parsed.is_null().sum()) == 0:
+                        return parsed.cast(pl.Datetime)
+
+        # If fallback is disabled, signal failure
         if not allow_fallback:
-            # If we parsed something but nulls remain, signal failure to caller
             if parsed is None or int(parsed.is_null().sum()) != 0:
                 raise ValueError(
                     "Could not fully parse series with vectorized attempts and fallback is disabled"
                 )
 
-        # 4) Fallback: Python-per-value parsing only for remaining nulls
-        if parsed is None:
-            parsed_vals = [parse_single_datetime(v) for v in series.to_list()]
-        else:
-            parsed_vals = parsed.to_list()
-            null_mask = parsed.is_null().to_list()
-            for i, is_null in enumerate(null_mask):
-                if is_null:
-                    try:
-                        parsed_vals[i] = parse_single_datetime(series[i])
-                    except Exception:
-                        logger.debug("Python fallback failed for index %d", i, exc_info=True)
+        # 5) Python fallback for remaining nulls
+        parsed_vals = _apply_python_fallback_parsing(series, parsed)
 
         try:
             new_col = pl.Series(name=name, values=parsed_vals).cast(pl.Datetime)
         except Exception:
-            logger.debug("Failed to cast parsed values to pl.Datetime for column %s, returning best-effort series", name, exc_info=True)
+            logger.debug(
+                "Failed to cast parsed values to pl.Datetime for column %s, returning best-effort series",
+                name,
+                exc_info=True,
+            )
             new_col = pl.Series(name=name, values=parsed_vals)
         return new_col
     except Exception:
