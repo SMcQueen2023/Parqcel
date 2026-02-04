@@ -3,6 +3,7 @@
 Provides lightweight wrappers around OpenAI and HuggingFace backends,
 each created only if the corresponding library is installed.
 """
+
 from __future__ import annotations
 
 from typing import Optional, Dict, Any, Protocol
@@ -30,7 +31,9 @@ def _parse_transformation_response(resp_text: str) -> Dict[str, str]:
         raise InvalidTransformationResponse("Response was not valid JSON") from exc
 
     if not isinstance(data, dict):
-        raise InvalidTransformationResponse("Response must be a JSON object with 'text' and 'code'")
+        raise InvalidTransformationResponse(
+            "Response must be a JSON object with 'text' and 'code'"
+        )
 
     text = data.get("text")
     code = data.get("code")
@@ -46,20 +49,45 @@ def _parse_transformation_response(resp_text: str) -> Dict[str, str]:
 
     extra_keys = set(data.keys()) - {"text", "code"}
     if extra_keys:
-        logger.debug("Ignoring extra transformation response keys: %s", ", ".join(sorted(extra_keys)))
+        logger.debug(
+            "Ignoring extra transformation response keys: %s",
+            ", ".join(sorted(extra_keys)),
+        )
 
     return {"text": text.strip(), "code": code.strip()}
 
 
 def _load_prompt(template_name: str, **kwargs) -> str:
+    """Load a prompt template from prompts.json with fallback to minimal templates.
+
+    Args:
+        template_name: Name of the template to load
+        **kwargs: Template formatting arguments
+
+    Returns:
+        Formatted prompt string
+    """
     try:
-        data = resources.files("ai").joinpath("prompts.json").read_text(encoding="utf-8")
+        data = (
+            resources.files("ai").joinpath("prompts.json").read_text(encoding="utf-8")
+        )
         prompts = json.loads(data)
         template = prompts.get(template_name)
         if template:
             return template.format(**kwargs)
-    except Exception:
-        pass
+    except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
+        logger.debug(
+            "Could not load prompt template '%s': %s. Using fallback.",
+            template_name,
+            e,
+        )
+    except Exception as e:
+        logger.warning(
+            "Unexpected error loading prompt template '%s': %s. Using fallback.",
+            template_name,
+            e,
+        )
+
     # fallback minimal template
     if template_name == "transformation":
         return (
@@ -88,11 +116,11 @@ def _lazy_hf_pipeline():
 
 
 class BackendProtocol(Protocol):
-    def generate_text(self, prompt: str) -> str:
-        ...
+    def generate_text(self, prompt: str) -> str: ...
 
-    def generate_transformation(self, prompt: str, df_name: str = "df") -> Dict[str, Any]:
-        ...
+    def generate_transformation(
+        self, prompt: str, df_name: str = "df"
+    ) -> Dict[str, Any]: ...
 
 
 class OpenAIBackend:
@@ -105,22 +133,47 @@ class OpenAIBackend:
         self._openai = openai
 
     def generate_text(self, prompt: str) -> str:
-        # Use Chat Completions if available, fallback to Completion
+        """Generate text using OpenAI API.
+
+        Tries ChatCompletion first, falls back to Completion if needed.
+
+        Args:
+            prompt: The prompt text
+
+        Returns:
+            Generated text response
+
+        Raises:
+            RuntimeError: If both API calls fail
+        """
         openai = self._openai
         try:
             resp = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo", messages=[{"role": "user", "content": prompt}], max_tokens=256
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=256,
             )
             return resp.choices[0].message.content.strip()
-        except Exception:
-            try:
-                resp = openai.Completion.create(model="text-davinci-003", prompt=prompt, max_tokens=256)
-                return resp.choices[0].text.strip()
-            except Exception as e:
-                logger.exception("OpenAI generation failed: %s", e)
-                raise
+        except AttributeError:
+            # ChatCompletion not available, try Completion
+            logger.debug("ChatCompletion not available, falling back to Completion API")
+        except Exception as e:
+            logger.warning(
+                "ChatCompletion failed: %s, falling back to Completion API", e
+            )
 
-    def generate_transformation(self, prompt: str, df_name: str = "df") -> Dict[str, Any]:
+        try:
+            resp = openai.Completion.create(
+                model="text-davinci-003", prompt=prompt, max_tokens=256
+            )
+            return resp.choices[0].text.strip()
+        except Exception as e:
+            logger.exception("OpenAI Completion API also failed: %s", e)
+            raise RuntimeError(f"OpenAI text generation failed: {e}") from e
+
+    def generate_transformation(
+        self, prompt: str, df_name: str = "df"
+    ) -> Dict[str, Any]:
         # Ask the LLM to produce a Polars snippet. The caller must review/apply.
         user_prompt = _load_prompt("transformation", prompt=prompt, df_name=df_name)
         resp_text = self.generate_text(user_prompt)
@@ -144,7 +197,9 @@ class HuggingFaceBackend:
         out = self.gen(prompt, max_length=256, do_sample=False)
         return out[0]["generated_text"].strip()
 
-    def generate_transformation(self, prompt: str, df_name: str = "df") -> Dict[str, Any]:
+    def generate_transformation(
+        self, prompt: str, df_name: str = "df"
+    ) -> Dict[str, Any]:
         text = self.generate_text(prompt)
         try:
             parsed = _parse_transformation_response(text)
@@ -152,7 +207,9 @@ class HuggingFaceBackend:
             logger.warning("Invalid transformation response: %s", exc)
             parsed = {"text": f"Invalid transformation response: {exc}", "code": ""}
         if not parsed.get("code"):
-            parsed["code"] = "# HuggingFace backend returned text; manual extraction required"
+            parsed["code"] = (
+                "# HuggingFace backend returned text; manual extraction required"
+            )
         return parsed
 
 
@@ -160,7 +217,9 @@ class DummyBackend:
     def generate_text(self, prompt: str) -> str:
         return "(dummy) I can suggest simple transformations like 'top N by column' or 'filter'."
 
-    def generate_transformation(self, prompt: str, df_name: str = "df") -> Dict[str, Any]:
+    def generate_transformation(
+        self, prompt: str, df_name: str = "df"
+    ) -> Dict[str, Any]:
         return {"text": "(dummy) suggested transformation", "code": "# no-op"}
 
 
@@ -169,7 +228,9 @@ def create_backend(cfg: Dict[str, Any]):
     logger.info("Creating AI backend provider=%s", provider)
     if provider == "openai":
         api_key = cfg.get("openai_api_key") or os.environ.get("PARQCEL_OPENAI_API_KEY")
-        api_base = cfg.get("openai_api_base") or os.environ.get("PARQCEL_OPENAI_API_BASE")
+        api_base = cfg.get("openai_api_base") or os.environ.get(
+            "PARQCEL_OPENAI_API_BASE"
+        )
         logger.debug(
             "OpenAI backend configured (api_base_set=%s, api_key_present=%s)",
             bool(api_base),

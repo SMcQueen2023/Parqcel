@@ -23,6 +23,13 @@ Parqcel is a PyQt6 + Polars desktop app for opening, exploring, editing, and ana
 - Env overrides: `PARQCEL_AI_PROVIDER`, `PARQCEL_OPENAI_API_KEY`, `PARQCEL_OPENAI_API_BASE`, `PARQCEL_HF_MODEL`
 - Backends: `dummy` (offline scaffold), `openai`, `hf` (transformers pipeline)
 
+### Security considerations for AI features
+The AI assistant executes LLM-generated Python code to transform data. While the code validator (see `ai/validator.py`) restricts operations to `df` and `pl` objects only, users should be aware:
+- Only execute AI suggestions on non-sensitive data
+- Review generated code before applying transformations
+- The validator is defense-in-depth, not a complete sandbox
+- See `ai/validator.py` for detailed security documentation
+
 ## Testing
 ```powershell
 pip install .[dev]

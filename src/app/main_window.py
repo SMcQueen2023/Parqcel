@@ -36,7 +36,7 @@ from ds.featurize import generate_feature_matrix, add_features_to_df, detect_col
 from app.widgets.pca_gui import PCADialog
 from ds.dimensionality import compute_pca, compute_umap
 import webbrowser
-import ast
+from ai.validator import prepare_transformation_for_execution, TransformationValidationError
 from app.widgets.ai_assistant import AIAssistantWidget
 from app.widgets.ai_settings import AISettingsDialog
 from app.temp_files import TempFileManager
@@ -797,164 +797,19 @@ class MainWindow(QMainWindow):
     def _safe_execute_transformation(self, code: str):
         """Validate and safely execute a transformation code string.
 
-        Rules:
-        - Only the names `df` and `pl` are permitted as free names in the code.
-        - No import statements are allowed.
-        - Attribute access and calls are allowed only when they are on `df` or `pl`.
-
-        The code may be a single expression (preferred) or a small sequence of statements;
-        if the last node is an expression it will be captured as the result.
+        Uses AST validation to ensure only safe operations on 'df' and 'pl'.
+        See ai.validator module for detailed security documentation.
 
         Returns a Polars DataFrame on success, or raises an exception.
         """
         import polars as pl
 
-        tree = ast.parse(code, mode="exec")
+        try:
+            tree, result_var_name = prepare_transformation_for_execution(code)
+        except TransformationValidationError as e:
+            raise ValueError(f"Code validation failed: {e}") from e
 
-        allowed_names = {"df", "pl", "True", "False", "None"}
-        dangerous_attrs = {"__globals__", "__dict__", "__class__", "__mro__", "__subclasses__", "__getattribute__"}
-
-        allowed_node_types = (
-            ast.Module,
-            ast.Expr,
-            ast.Assign,
-            ast.Name,
-            ast.Load,
-            ast.Store,
-            ast.Attribute,
-            ast.Subscript,
-            ast.Constant,
-            ast.Call,
-            ast.Tuple,
-            ast.List,
-            ast.Dict,
-            ast.Set,
-            ast.Compare,
-            ast.BoolOp,
-            ast.BinOp,
-            ast.UnaryOp,
-            ast.keyword,
-            ast.Slice,
-            # operators
-            ast.Gt,
-            ast.GtE,
-            ast.Lt,
-            ast.LtE,
-            ast.Eq,
-            ast.NotEq,
-            ast.In,
-            ast.NotIn,
-            ast.And,
-            ast.Or,
-            ast.Add,
-            ast.Sub,
-            ast.Mult,
-            ast.Div,
-            ast.Mod,
-            ast.Pow,
-            ast.USub,
-            ast.UAdd,
-        )
-
-        def root_name(node):
-            cur = node
-            while True:
-                if isinstance(cur, ast.Attribute):
-                    cur = cur.value
-                elif isinstance(cur, ast.Subscript):
-                    cur = cur.value
-                elif isinstance(cur, ast.Call):
-                    cur = cur.func
-                else:
-                    break
-            return cur.id if isinstance(cur, ast.Name) else None
-
-        class Validator(ast.NodeVisitor):
-            def generic_visit(self, node):
-                if not isinstance(node, allowed_node_types):
-                    raise ValueError(f"Unsupported syntax: {type(node).__name__}")
-                super().generic_visit(node)
-
-            def visit_Import(self, node):
-                raise ValueError("Import statements are not allowed in assistant code")
-
-            def visit_ImportFrom(self, node):
-                raise ValueError("Import statements are not allowed in assistant code")
-
-            def visit_Lambda(self, node):
-                raise ValueError("Lambdas are not allowed")
-
-            def visit_ListComp(self, node):
-                raise ValueError("Comprehensions are not allowed")
-
-            def visit_DictComp(self, node):
-                raise ValueError("Comprehensions are not allowed")
-
-            def visit_SetComp(self, node):
-                raise ValueError("Comprehensions are not allowed")
-
-            def visit_GeneratorExp(self, node):
-                raise ValueError("Comprehensions are not allowed")
-
-            def visit_Await(self, node):
-                raise ValueError("Await/async not allowed")
-
-            def visit_Name(self, node):
-                if node.id not in allowed_names:
-                    raise ValueError(f"Use of name '{node.id}' is not permitted")
-
-            def visit_Attribute(self, node):
-                # Disallow dangerous/dunder attrs anywhere in chain; root must be df or pl
-                cur = node
-                while isinstance(cur, ast.Attribute):
-                    if cur.attr.startswith("__") or cur.attr in dangerous_attrs:
-                        raise ValueError("Access to dunder or dangerous attributes is not permitted")
-                    cur = cur.value
-                base = root_name(node)
-                if base not in ("df", "pl"):
-                    raise ValueError("Attribute access only permitted on 'df' or 'pl'")
-                self.generic_visit(node)
-
-            def visit_Subscript(self, node):
-                base = root_name(node)
-                if base not in ("df", "pl"):
-                    raise ValueError("Subscript only permitted on 'df' or 'pl'")
-                if isinstance(node.value, ast.Attribute):
-                    if getattr(node.value, "attr", "").startswith("__") or node.value.attr in dangerous_attrs:
-                        raise ValueError("Subscript of dangerous attributes is not permitted")
-                self.generic_visit(node)
-
-            def visit_Call(self, node):
-                base = root_name(node)
-                if base not in ("df", "pl"):
-                    raise ValueError("Calls are only allowed on 'df' or 'pl' chains")
-                # Disallow calling dunder/dangerous attrs anywhere in func chain
-                func = node.func
-                while isinstance(func, ast.Attribute):
-                    if func.attr.startswith("__") or func.attr in dangerous_attrs:
-                        raise ValueError("Calls to dunder or dangerous attributes are not allowed")
-                    func = func.value
-                if isinstance(func, ast.Name) and func.id not in ("df", "pl"):
-                    raise ValueError("Direct function calls are not permitted")
-                self.generic_visit(node)
-
-            def visit_Assign(self, node):
-                for tgt in node.targets:
-                    if isinstance(tgt, ast.Name) and tgt.id.startswith("__"):
-                        raise ValueError("Assignment to dunder names is not allowed")
-                self.generic_visit(node)
-
-        Validator().visit(tree)
-
-        # If last node is an Expr, replace it with assignment to capture result
-        if tree.body and isinstance(tree.body[-1], ast.Expr):
-            result_name = "__parqcel_result__"
-            expr_node = tree.body[-1]
-            assign = ast.Assign(targets=[ast.Name(id=result_name, ctx=ast.Store())], value=expr_node.value)
-            tree.body[-1] = assign
-
-        # Fix any missing lineno/col_offset information before compiling
-        tree = ast.fix_missing_locations(tree)
+        # Compile the validated AST
         compiled = compile(tree, filename="<assistant>", mode="exec")
 
         # Execute in restricted environment
@@ -962,12 +817,14 @@ class MainWindow(QMainWindow):
         locs = {"df": self.model.get_dataframe()}
         exec(compiled, globs, locs)
 
-        if "__parqcel_result__" in locs:
-            res = locs["__parqcel_result__"]
+        if result_var_name in locs:
+            res = locs[result_var_name]
             if isinstance(res, pl.DataFrame):
                 return res
             else:
-                raise ValueError("Result is not a Polars DataFrame")
+                raise ValueError(
+                    f"Result is not a Polars DataFrame (got {type(res).__name__})"
+                )
 
         # If result not provided, disallow applying ambiguous changes
         raise ValueError("No result DataFrame returned by the executed code")
