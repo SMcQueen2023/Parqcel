@@ -66,12 +66,12 @@ Whether you're exploring a multi-gigabyte Parquet file, cleaning CSV data, or pe
   - OpenAI (GPT models)
   - HuggingFace (local or hosted transformers)
   - Dummy mode (offline testing)
-- **Context-aware**: Automatically understands your dataframe schema
+- **Prompt-based**: Operates on your natural-language request; dataframe schema is not automatically included in prompts
 
 ### 🔒 Security & Safety
 - **Secure code execution**: AI-generated code validated before running
 - **Credential management**: API keys stored in OS keyring (not plaintext)
-- **Privacy-focused**: Only column names sent to AI, never actual data
+- **Privacy considerations**: Your prompts are sent to the configured AI provider; the app does not automatically add table data or perform redaction, so avoid including sensitive data in prompts and review your provider's data policies
 - **Comprehensive validation**: See [SECURITY.md](SECURITY.md) for details
 
 ---
