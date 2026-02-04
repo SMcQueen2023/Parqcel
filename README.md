@@ -213,7 +213,7 @@ Config stored at: `~/.parqcel/config.json` (auto-created by GUI)
 
 ```json
 {
-  "ai_provider": "openai",
+  "provider": "openai",
   "openai_api_base": "https://api.openai.com/v1",
   "hf_model": "gpt2"
 }
