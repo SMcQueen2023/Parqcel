@@ -14,6 +14,9 @@ SolidCompression=yes
 SetupIconFile={#SourcePath}\..\src\parqcel\assets\parqcel_icon.ico
 
 [Tasks]
+Name: "install_profile\base"; Description: "Base install (viewer/editor only)"; Flags: exclusive
+Name: "install_profile\ml"; Description: "ML install (adds featurization and dimensionality reduction)"; Flags: exclusive unchecked
+Name: "install_profile\ai"; Description: "AI install (adds ML plus OpenAI/local AI integrations)"; Flags: exclusive unchecked
 Name: "desktopicon"; Description: "Create a &desktop icon"; Flags: unchecked
 
 [Files]
@@ -25,43 +28,73 @@ Source: "{#SourcePath}\..\src\parqcel\assets\parqcel_icon.ico"; DestDir: "{app}"
 [Run]
 ; Ensure pip is present/up-to-date
 Filename: "{code:GetPythonExe}"; Parameters: "-m pip install --upgrade pip"; StatusMsg: "Updating pip..."; Flags: runhidden shellexec waituntilterminated
-; Install Parqcel with AI extras; switch to .[ml] or bare . if you prefer
-Filename: "{code:GetPythonExe}"; Parameters: "-m pip install .[ai]"; WorkingDir: "{app}"; StatusMsg: "Installing Parqcel..."; Flags: runhidden shellexec waituntilterminated
+; Install the selected Parqcel profile
+Filename: "{code:GetPythonExe}"; Parameters: "-m pip install {code:GetInstallTarget}"; WorkingDir: "{app}"; StatusMsg: "Installing Parqcel..."; Flags: runhidden shellexec waituntilterminated
 
 [Icons]
 Name: "{group}\Parqcel"; Filename: "{code:GetPythonExe}"; Parameters: "-m parqcel"; WorkingDir: "{userdocs}"; IconFilename: "{app}\parqcel_icon.ico"
 Name: "{userdesktop}\Parqcel"; Filename: "{code:GetPythonExe}"; Parameters: "-m parqcel"; WorkingDir: "{userdocs}"; IconFilename: "{app}\parqcel_icon.ico"; Tasks: desktopicon
 
 [Code]
+function GetInstallTarget(Param: string): string;
+begin
+  if WizardIsTaskSelected('install_profile\ai') then
+  begin
+    Result := '.[ai]';
+    exit;
+  end;
+
+  if WizardIsTaskSelected('install_profile\ml') then
+  begin
+    Result := '.[ml]';
+    exit;
+  end;
+
+  Result := '.';
+end;
+
 function GetPythonExe(Param: string): string;
 begin
-  // Preferred specific install (adjust if your Python path differs)
-  if FileExists('C:\\Users\\scott\\AppData\\Local\\Programs\\Python\\Python313\\python.exe') then
+  // Preferred per-user installs under LocalAppData
+  if FileExists(ExpandConstant('{localappdata}\Programs\Python\Python313\python.exe')) then
   begin
-    Result := 'C:\\Users\\scott\\AppData\\Local\\Programs\\Python\\Python313\\python.exe';
+    Result := ExpandConstant('{localappdata}\Programs\Python\Python313\python.exe');
     exit;
   end;
-  // Fallback to common locations
-  if FileExists(ExpandConstant('{pf64}\\Python313\\python.exe')) then
+  if FileExists(ExpandConstant('{localappdata}\Programs\Python\Python312\python.exe')) then
   begin
-    Result := ExpandConstant('{pf64}\\Python313\\python.exe');
+    Result := ExpandConstant('{localappdata}\Programs\Python\Python312\python.exe');
     exit;
   end;
-  if FileExists(ExpandConstant('{pf64}\\Python312\\python.exe')) then
+  if FileExists(ExpandConstant('{localappdata}\Programs\Python\Python311\python.exe')) then
   begin
-    Result := ExpandConstant('{pf64}\\Python312\\python.exe');
+    Result := ExpandConstant('{localappdata}\Programs\Python\Python311\python.exe');
     exit;
   end;
-  if FileExists(ExpandConstant('{pf64}\\Python311\\python.exe')) then
+
+  // Fallback to common system locations
+  if FileExists(ExpandConstant('{pf64}\Python313\python.exe')) then
   begin
-    Result := ExpandConstant('{pf64}\\Python311\\python.exe');
+    Result := ExpandConstant('{pf64}\Python313\python.exe');
     exit;
   end;
+  if FileExists(ExpandConstant('{pf64}\Python312\python.exe')) then
+  begin
+    Result := ExpandConstant('{pf64}\Python312\python.exe');
+    exit;
+  end;
+  if FileExists(ExpandConstant('{pf64}\Python311\python.exe')) then
+  begin
+    Result := ExpandConstant('{pf64}\Python311\python.exe');
+    exit;
+  end;
+
   // Last resort: try the py launcher in System32, otherwise python.exe on PATH
   if FileExists(ExpandConstant('{sys}\py.exe')) then
   begin
     Result := 'py';
     exit;
   end;
+
   Result := 'python.exe';
 end;

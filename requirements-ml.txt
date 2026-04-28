@@ -1,9 +1,6 @@
-# Optional machine learning / AI dependencies for Parqcel
+# Compatibility export for the Parqcel ML install profile.
+-r requirements.txt
 numpy
 scikit-learn
 plotly
 umap-learn
-sentence-transformers
-faiss-cpu
-langchain
-transformers

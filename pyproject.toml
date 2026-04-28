@@ -42,17 +42,27 @@ ml = [
   "plotly",
   "umap-learn",
 ]
+ai-openai = [
+  "openai>=0.28,<1",
+  "keyring",
+]
+ai-local = [
+  "sentence-transformers",
+  "faiss-cpu",
+  "langchain",
+  "transformers",
+]
 ai = [
   "numpy",
   "scikit-learn",
   "plotly",
   "umap-learn",
+  "openai>=0.28,<1",
+  "keyring",
   "sentence-transformers",
   "faiss-cpu",
   "langchain",
   "transformers",
-  "openai>=0.28,<1",
-  "keyring",
 ]
 dev = [
   "pytest",

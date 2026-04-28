@@ -1,5 +1,7 @@
 # Parqcel
 
+![Parqcel logo](src/parqcel/assets/parqcel_icon.png)
+
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
@@ -105,6 +107,16 @@ parqcel
 
 Parqcel offers modular installation based on your needs:
 
+| Need | Command |
+|------|---------|
+| Core desktop app only | `pip install .` |
+| Core app + ML tooling | `pip install .[ml]` |
+| Core app + hosted AI backends | `pip install .[ai-openai]` |
+| Core app + local AI backends | `pip install .[ai-local]` |
+| Core app + ML + hosted AI | `pip install .[ml,ai-openai]` |
+| Core app + ML + local AI | `pip install .[ml,ai-local]` |
+| Everything | `pip install .[ai]` |
+
 #### 1. **Base Installation** (GUI only)
 ```bash
 pip install .
@@ -118,24 +130,54 @@ pip install .[ml]
 Adds: numpy, scikit-learn, plotly, umap-learn  
 Enables: Featurization, PCA/UMAP, dimensionality reduction
 
-#### 3. **AI Assistant Package** (full features)
+#### 3. **OpenAI Support Add-on**
+```bash
+pip install .[ai-openai]
+```
+Adds: OpenAI API client, keyring  
+Enables: Hosted AI backends without downloading local transformer models
+
+Recommended when you want the assistant backed by OpenAI but do not want the local transformer stack. Combine with `.[ml]` if you also want featurization and dimensionality reduction.
+
+#### 4. **Local AI Add-on**
+```bash
+pip install .[ai-local]
+```
+Adds: sentence-transformers, faiss-cpu, langchain, transformers  
+Enables: Local embedding and Hugging Face based AI workflows
+
+Recommended when you want local or Hugging Face driven AI features without pulling in the hosted OpenAI client.
+
+#### 5. **AI Assistant Package** (full features)
 ```bash
 pip install .[ai]
 ```
-Adds: All ML dependencies + OpenAI, transformers, langchain, keyring  
+Adds: All ML dependencies + hosted and local AI backends  
 Enables: AI-powered code generation, embeddings, NLP features
 
-#### 4. **Development Package**
+#### 6. **Development Package**
 ```bash
 pip install .[dev]
 ```
 Adds: pytest, pytest-qt, black, ruff, mypy  
 Enables: Running tests, linting, type checking
 
+### Windows Installer Profiles
+
+The Windows installer supports three install profiles:
+
+- **Base**: smallest download for viewing and editing parquet, csv, and xlsx data
+- **ML**: adds featurization and dimensionality reduction tooling
+- **AI**: adds the full AI stack on top of ML features
+
+Choose the smallest profile that matches the features you actually use. The installer no longer defaults every Windows install to the full AI dependency set.
+
 ### Installing from PyPI (when published)
 ```bash
 pip install parqcel          # Base
 pip install parqcel[ml]      # With ML
+pip install parqcel[ai-openai]  # OpenAI integration only
+pip install parqcel[ai-local]   # Local AI integration only
 pip install parqcel[ai]      # With AI
 pip install parqcel[dev]     # Dev tools
 ```

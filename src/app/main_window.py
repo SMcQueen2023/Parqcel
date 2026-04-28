@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QAction, QFont
 from PyQt6.QtCore import Qt, QPoint
+import importlib.util
 import polars as pl
 import os
 import time
@@ -31,14 +32,8 @@ from logic.stats import (
     get_column_statistics,
     get_column_type_counts_string,
 )
-from app.widgets.featurize_gui import FeaturizeDialog
-from ds.featurize import generate_feature_matrix, add_features_to_df, detect_columns
-from app.widgets.pca_gui import PCADialog
-from ds.dimensionality import compute_pca, compute_umap
 import webbrowser
 from ai.validator import prepare_transformation_for_execution, TransformationValidationError
-from app.widgets.ai_assistant import AIAssistantWidget
-from app.widgets.ai_settings import AISettingsDialog
 from app.temp_files import TempFileManager
 import logging
 
@@ -173,6 +168,21 @@ class MainWindow(QMainWindow):
         self.last_button.clicked.connect(self.load_last_page)
         self.jump_button.clicked.connect(self.jump_to_page)
 
+    def _optional_modules_available(self, *module_names):
+        return all(importlib.util.find_spec(module_name) is not None for module_name in module_names)
+
+    def _set_action_state(self, action, enabled, message=None):
+        action.setEnabled(enabled)
+        tooltip = "" if enabled else (message or "Optional dependency is not installed.")
+        action.setToolTip(tooltip)
+        action.setStatusTip(tooltip)
+
+    def _configure_optional_actions(self):
+        ml_message = "Install the '[ml]' extras to enable this feature."
+        ml_available = self._optional_modules_available("numpy", "sklearn")
+        self._set_action_state(self.featurize_action, ml_available, ml_message)
+        self._set_action_state(self.dim_action, ml_available, ml_message)
+
     def _createMenuBar(self):
         menu_bar = self.menuBar()
 
@@ -208,21 +218,23 @@ class MainWindow(QMainWindow):
 
         # Analysis menu
         analysis_menu = menu_bar.addMenu("Analysis")
-        featurize_action = QAction("Featurize Columns...", self)
-        featurize_action.triggered.connect(self.handle_featurize)
-        analysis_menu.addAction(featurize_action)
-        dim_action = QAction("Dimensionality Reduction...", self)
-        dim_action.triggered.connect(self.handle_dimensionality)
-        analysis_menu.addAction(dim_action)
-        ai_action = QAction("AI Assistant...", self)
-        ai_action.triggered.connect(self.handle_ai_assistant)
-        analysis_menu.addAction(ai_action)
+        self.featurize_action = QAction("Featurize Columns...", self)
+        self.featurize_action.triggered.connect(self.handle_featurize)
+        analysis_menu.addAction(self.featurize_action)
+        self.dim_action = QAction("Dimensionality Reduction...", self)
+        self.dim_action.triggered.connect(self.handle_dimensionality)
+        analysis_menu.addAction(self.dim_action)
+        self.ai_action = QAction("AI Assistant...", self)
+        self.ai_action.triggered.connect(self.handle_ai_assistant)
+        analysis_menu.addAction(self.ai_action)
 
         # Settings menu
         settings_menu = menu_bar.addMenu("Settings")
-        ai_settings_action = QAction("AI Settings...", self)
-        ai_settings_action.triggered.connect(self.handle_ai_settings)
-        settings_menu.addAction(ai_settings_action)
+        self.ai_settings_action = QAction("AI Settings...", self)
+        self.ai_settings_action.triggered.connect(self.handle_ai_settings)
+        settings_menu.addAction(self.ai_settings_action)
+
+        self._configure_optional_actions()
 
     def open_file(self):
         file_dialog = QFileDialog(self)
@@ -616,6 +628,22 @@ class MainWindow(QMainWindow):
             logger.debug("MultiSortDialog canceled or closed")
 
     def handle_featurize(self):
+        try:
+            from app.widgets.featurize_gui import FeaturizeDialog
+            from ds.featurize import (
+                add_features_to_df,
+                detect_columns,
+                generate_feature_matrix,
+            )
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "Missing dependency",
+                "Featurization requires the '[ml]' extras. Install them to use this feature.",
+            )
+            logger.debug("Featurize dependencies unavailable", exc_info=exc)
+            return
+
         if not self.is_model_loaded():
             return
 
@@ -650,6 +678,8 @@ class MainWindow(QMainWindow):
     def handle_dimensionality(self):
         try:
             import numpy as np
+            from app.widgets.pca_gui import PCADialog
+            from ds.dimensionality import compute_pca, compute_umap
         except Exception:
             QMessageBox.critical(self, "Missing dependency", "NumPy is required for dimensionality reduction. Install the '[ml]' extras or numpy in your environment.")
             return
@@ -837,6 +867,7 @@ class MainWindow(QMainWindow):
                 return
 
             # import factory lazily to avoid heavy ML/backends imports during module import
+            from app.widgets.ai_assistant import AIAssistantWidget
             from ai.assistant import assistant_from_config
 
             assistant = assistant_from_config()
@@ -888,6 +919,9 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "AI Assistant Error", f"Could not create assistant: {e}")
 
     def handle_ai_settings(self):
+        from app.widgets.ai_assistant import AIAssistantWidget
+        from app.widgets.ai_settings import AISettingsDialog
+
         dlg = AISettingsDialog(self)
         # show dialog modally; after it closes, reload assistant config
         dlg.exec()
