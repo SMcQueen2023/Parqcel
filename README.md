@@ -80,16 +80,65 @@ Whether you're exploring a multi-gigabyte Parquet file, cleaning CSV data, or pe
 
 ## 📋 System Requirements
 
-- **Python**: 3.11 or higher
 - **Operating System**: Windows, macOS, or Linux
 - **Memory**: 4GB minimum, 8GB+ recommended for large files
 - **Display**: 1280x720 minimum resolution
+
+For Windows installer users, Python is not required on the target machine.
+Python 3.11+ is only required for source, `pip`, and packaging workflows.
 
 ---
 
 ## 🚀 Installation
 
-### Quick Start (GUI Only)
+### For Most Windows Users
+
+The primary distribution path for Parqcel is the standalone Windows installer.
+
+1. Download `Parqcel-Installer.exe` from the latest Windows release.
+2. Double-click the installer.
+3. Keep the default install location unless you have a specific reason to change it.
+4. Optionally enable the Desktop shortcut checkbox.
+5. Finish setup and launch Parqcel from the Start Menu or Desktop shortcut.
+
+What this gives you:
+
+- No Python installation required
+- No terminal usage during setup
+- Normal Windows app shortcuts and uninstall entry
+
+### Windows Desktop Installer for Releases
+
+The Windows installer is built from a standalone desktop bundle instead of running `pip install` on the target machine.
+
+- No Python installation is required on the end-user device.
+- No terminal is required during installation.
+- Start Menu and optional Desktop shortcuts are created by the installer.
+- The packaged feature set is determined by the desktop build profile.
+
+Recommended release shape:
+
+- Build the desktop installer with the `base` profile for mainstream non-technical users.
+- Keep `pip install` for technical users and advanced AI workflows.
+- Use the `ml` profile only when you want featurization and dimensionality reduction included in the desktop app.
+
+#### Build the standalone Windows installer
+
+```powershell
+py -3 -m pip install .[desktop-build]
+pwsh -File .\scripts\build_windows_desktop.ps1 -Clean -Installer
+```
+
+If you want ML features in the desktop app, install them into the build environment before running the packaging script:
+
+```powershell
+py -3 -m pip install .[ml,desktop-build]
+pwsh -File .\scripts\build_windows_desktop.ps1 -Clean -Profile ml -Installer
+```
+
+The packaging script produces a standalone app in `dist\Parqcel` and, when Inno Setup is available, an installer in `installer\dist\Parqcel-Installer.exe`. The default `base` profile explicitly excludes ML and AI stacks so the desktop build stays small and predictable even when your local Python environment has extra packages installed.
+
+### For Technical Users (Python / Source)
 
 ```bash
 # Clone the repository
@@ -103,9 +152,11 @@ pip install .
 parqcel
 ```
 
-### Installation Options
+### Python Installation Options
 
-Parqcel offers modular installation based on your needs:
+Use the Python installation path if you want source-based development, scripting, automation, or access to the heavier optional dependency stacks.
+
+Parqcel offers modular Python installation based on your needs:
 
 | Need | Command |
 |------|---------|
@@ -162,17 +213,13 @@ pip install .[dev]
 Adds: pytest, pytest-qt, black, ruff, mypy  
 Enables: Running tests, linting, type checking
 
-### Windows Installer Profiles
-
-The Windows installer supports three install profiles:
-
-- **Base**: smallest download for viewing and editing parquet, csv, and xlsx data
-- **ML**: adds featurization and dimensionality reduction tooling
-- **AI**: adds the full AI stack on top of ML features
-
-Choose the smallest profile that matches the features you actually use. The installer no longer defaults every Windows install to the full AI dependency set.
-
-### Installing from PyPI (when published)
+#### 7. **Desktop Packaging Tools**
+```bash
+pip install .[desktop-build]
+```
+Adds: PyInstaller  
+Enables: Building a standalone Windows desktop app and installer
+### Installing from PyPI (Technical Users)
 ```bash
 pip install parqcel          # Base
 pip install parqcel[ml]      # With ML

@@ -71,6 +71,9 @@ dev = [
   "ruff",
   "mypy",
 ]
+desktop-build = [
+  "pyinstaller>=6.0",
+]
 
 [project.scripts]
 parqcel = "parqcel.__main__:main"

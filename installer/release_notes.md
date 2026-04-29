@@ -1,24 +1,26 @@
-Parqcel 0.1.0 — Installer, AI assistant hardening, and stability fixes
+Parqcel 0.1.0 — Desktop installer, AI assistant hardening, and stability fixes
 
-This release provides a Windows installer and several reliability and safety improvements.
+This release provides a standalone Windows desktop installer and several reliability and safety improvements.
 
 Highlights:
 
-- Installer: Inno Setup installer (Parqcel-Installer.exe) that copies the app to %AppData%\Parqcel, installs the project with AI extras (runs `pip install .[ai]`), and creates Start Menu and optional Desktop shortcuts.
+- Installer: Inno Setup installer (Parqcel-Installer.exe) that packages a standalone PyInstaller desktop build, installs it under `%LocalAppData%\Programs\Parqcel`, and creates Start Menu and optional Desktop shortcuts.
 - Safety: Strict validation for LLM transformation responses with an explicit `InvalidTransformationResponse` error to avoid silently applying malformed payloads.
 - Stability: Centralized temporary file management via `src/app/temp_files.py` to ensure plot and temp artifacts are cleaned up reliably.
-- UX and packaging: Improved AI assistant/settings UX, `run_parqcel.cmd` launcher (uses `py -3`), README updates, and packaged icon assets.
+- UX and packaging: Improved AI assistant/settings UX, a standalone Windows packaging flow, `run_parqcel.cmd` launcher for Python users, README updates, and packaged icon assets.
 - Tests: Existing test suite updated with a parser test; run `pytest -q` to verify.
 
 Important notes:
 
-- The installer requires an existing Python installation on the target machine; by default it targets Python 3.13 but falls back to the `py` launcher or `python.exe` on PATH. The installer runs `pip install` at install time, so an internet connection is required to download dependencies (AI extras include large models/libraries).
-- If you prefer a smaller install, consider modifying `installer/parqcel.iss` to install `.[ml]` or the base package instead of `.[ai]`.
+- The installer no longer depends on Python being installed on the target machine.
+- The packaged feature set is determined by the desktop build profile. Use the default `base` profile for viewer/editor only, or build with the `ml` profile after installing `.[ml]` to ship ML tooling.
+- Advanced AI dependencies remain better suited to the Python install path because they are large and environment-sensitive.
 
 How to test the installer locally:
 
-1) Build the installer with Inno Setup (open `installer/parqcel.iss` and Compile).
-2) Run the generated `dist\Parqcel-Installer.exe` on a test machine.
-3) Launch Parqcel from Start Menu or the Desktop shortcut.
+1) Build the desktop bundle with `scripts\build_windows_desktop.ps1`.
+2) Compile `installer\parqcel.iss` with Inno Setup, or pass `-Installer` to the build script.
+3) Run the generated `installer\dist\Parqcel-Installer.exe` on a test machine.
+4) Launch Parqcel from Start Menu or the Desktop shortcut.
 
-For CI: use the Inno Setup command-line `ISCC.exe` to compile and then attach the produced EXE to a GitHub Release.
+For CI: run PyInstaller first, then use the Inno Setup command-line `ISCC.exe` to compile and attach the produced EXE to a GitHub Release.
