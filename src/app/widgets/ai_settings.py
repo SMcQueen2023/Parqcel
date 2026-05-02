@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 from ai.config import load_config
+from app.background_tasks import run_in_background
 
 
 class AISettingsDialog(QDialog):
@@ -147,33 +148,35 @@ class AISettingsDialog(QDialog):
                     # If keyring read fails, ignore and continue without key
                     logger.exception("Failed to read API key from keyring during test")
 
-        try:
-            self.test_btn.setEnabled(False)
-            # import backend factory lazily to avoid heavy ML imports during module import
+        self.test_btn.setEnabled(False)
+
+        def _task():
+            import time
+
             from ai.backends import create_backend
 
             backend = create_backend(cfg)
-        except Exception as e:
-            QMessageBox.critical(self, "Test Failed", f"Could not create backend: {e}")
-            return
-
-        # attempt a small ping
-        try:
-            import time
             start = time.perf_counter()
-            ok = False
             if hasattr(backend, "test_connection"):
                 ok = backend.test_connection()
             else:
-                # fallback: call generate_text with a ping prompt
                 resp = backend.generate_text("ping")
                 ok = resp is not None
-            elapsed = time.perf_counter() - start
+            return {"ok": ok, "elapsed": time.perf_counter() - start}
+
+        def _success(result) -> None:
+            ok = bool(result.get("ok"))
+            elapsed = float(result.get("elapsed", 0.0))
             if ok:
                 QMessageBox.information(self, "Test Succeeded", f"Connection OK (latency {elapsed:.2f}s)")
             else:
                 QMessageBox.warning(self, "Test Result", "Backend did not indicate success")
-        except Exception as e:
-            QMessageBox.critical(self, "Test Failed", f"Error during test: {e}")
-        finally:
+
+        def _error(exc: Exception) -> None:
+            message = str(exc)
+            QMessageBox.critical(self, "Test Failed", f"Error during test: {message}")
+
+        def _finished() -> None:
             self.test_btn.setEnabled(True)
+
+        run_in_background(self, _task, _success, _error, _finished)

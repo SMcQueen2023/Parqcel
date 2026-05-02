@@ -62,13 +62,14 @@ Whether you're exploring a multi-gigabyte Parquet file, cleaning CSV data, or pe
 
 ### 🤖 AI Assistant (AI Extras)
 - **Natural language queries**: Ask for data transformations in plain English
-- **Polars code generation**: Get syntactically correct Polars expressions
+- **Polars code suggestions**: Receive a proposed Polars expression that you review before applying
 - **Safe execution**: AST-based code validation ensures only safe operations
 - **Multiple backends**:
   - OpenAI (GPT models)
   - HuggingFace (local or hosted transformers)
   - Dummy mode (offline testing)
 - **Prompt-based**: Operates on your natural-language request; dataframe schema is not automatically included in prompts
+- **Current scope**: Best suited to single-step dataframe transformations rather than autonomous multi-step analysis
 
 ### 🔒 Security & Safety
 - **Secure code execution**: AI-generated code validated before running
@@ -115,6 +116,7 @@ The Windows installer is built from a standalone desktop bundle instead of runni
 - No terminal is required during installation.
 - Start Menu and optional Desktop shortcuts are created by the installer.
 - The packaged feature set is determined by the desktop build profile.
+- Release-ready artifacts can be preserved under `dist\release` for upload to GitHub Releases.
 
 Recommended release shape:
 
@@ -137,6 +139,8 @@ pwsh -File .\scripts\build_windows_desktop.ps1 -Clean -Profile ml -Installer
 ```
 
 The packaging script produces a standalone app in `dist\Parqcel` and, when Inno Setup is available, an installer in `installer\dist\Parqcel-Installer.exe`. The default `base` profile explicitly excludes ML and AI stacks so the desktop build stays small and predictable even when your local Python environment has extra packages installed.
+
+For release uploads, keep profile-specific outputs such as `dist\release\Parqcel-base`, `dist\release\Parqcel-Installer-base.exe`, `dist\release\Parqcel-ml`, and `dist\release\Parqcel-Installer-ml.exe`.
 
 ### For Technical Users (Python / Source)
 
@@ -341,6 +345,13 @@ Config stored at: `~/.parqcel/config.json` (auto-created by GUI)
 - **Review code**: Always check generated code before executing
 - **Test on samples**: Try transformations on filtered subsets first
 - **Iterative refinement**: If code doesn't work, rephrase your query
+
+### Current AI Limits
+
+- The assistant suggests one transformation at a time; it is not an autonomous analysis agent
+- Dummy mode is mainly for offline testing and only handles simple prompt patterns reliably
+- Real LLM backends return text plus a proposed code snippet; malformed responses are rejected rather than auto-applied
+- The validator reduces risk but does not provide full sandboxing or resource isolation
 
 ---
 
@@ -563,7 +574,7 @@ For detailed performance analysis and optimization strategies, see [PERFORMANCE.
 
 ## 🗺️ Roadmap
 
-### Current Version (0.1.0)
+### Current Version (0.1.1)
 - ✅ Parquet/CSV/Excel support
 - ✅ Inline editing with undo/redo
 - ✅ Column statistics and filtering

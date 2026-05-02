@@ -26,7 +26,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "parqcel"
-version = "0.1.0"
+version = "0.1.1"
 description = "Parqcel: fast Parquet viewer/editor using PyQt6 and Polars"
 readme = "README.md"
 requires-python = ">=3.11"

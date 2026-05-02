@@ -3,7 +3,7 @@
 
 [Setup]
 AppName=Parqcel
-AppVersion=0.1.0
+AppVersion=0.1.1
 DefaultDirName={localappdata}\Programs\Parqcel
 UsePreviousAppDir=no
 DefaultGroupName=Parqcel

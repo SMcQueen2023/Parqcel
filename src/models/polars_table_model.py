@@ -34,6 +34,46 @@ class PolarsTableModel(QAbstractTableModel):
         self._undo_stack.append(self._data.clone())
         self._redo_stack.clear()
 
+    def _replace_data(self, new_df: pl.DataFrame, reset_page: bool = False) -> None:
+        # Full reset so views refresh headers and cached metadata.
+        try:
+            self.beginResetModel()
+        except Exception:
+            logger.exception(
+                "beginResetModel failed; proceeding with manual reset/fallback signals"
+            )
+
+        self._data = new_df
+        self._max_pages = calculate_max_pages(new_df.height, self.chunk_size)
+        if reset_page:
+            self._current_page = 0
+        elif self._max_pages <= 0:
+            self._current_page = 0
+        else:
+            self._current_page = min(self._current_page, self._max_pages - 1)
+
+        self._current_data = get_page_data(
+            self._data, self._current_page, self.chunk_size
+        )
+        self._column_types = get_column_types(self._data)
+
+        try:
+            self.endResetModel()
+        except Exception:
+            logger.exception(
+                "endResetModel failed; falling back to layout/header signals"
+            )
+            self.layoutChanged.emit()
+            try:
+                self.headerDataChanged.emit(
+                    Qt.Orientation.Horizontal, 0, self.columnCount() - 1
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to emit headerDataChanged signal during endResetModel fallback for columns 0 to %d",
+                    self.columnCount() - 1,
+                )
+
     def rowCount(self, parent=None) -> int:
         return self._current_data.height
 
@@ -169,11 +209,11 @@ class PolarsTableModel(QAbstractTableModel):
         self.layoutChanged.emit()
 
     def drop_column(self, column_name: str) -> None:
-        self._data = self._data.drop(column_name)
-        self._current_data = get_page_data(
-            self._data, self._current_page, self.chunk_size
-        )
-        self.layoutChanged.emit()
+        if column_name not in self._data.columns:
+            return
+
+        self.save_state()
+        self._replace_data(self._data.drop(column_name), reset_page=False)
 
     def add_column(self, column_name: str, default_value: object | None = None) -> None:
         if column_name in self._data.columns:
@@ -205,66 +245,16 @@ class PolarsTableModel(QAbstractTableModel):
     def undo(self) -> None:
         if self._undo_stack:
             self._redo_stack.append(self._data.clone())
-            self._data = self._undo_stack.pop()
-            self._current_data = get_page_data(
-                self._data, self._current_page, self.chunk_size
-            )
-            self._column_types = get_column_types(self._data)
-            self.layoutChanged.emit()
-            try:
-                self.headerDataChanged.emit(Qt.Orientation.Horizontal, 0, self.columnCount() - 1)
-            except Exception:
-                logger.exception(
-                    "Failed to emit headerDataChanged signal for columns 0 to %d during undo",
-                    self.columnCount() - 1,
-                )
+            self._replace_data(self._undo_stack.pop(), reset_page=False)
 
     def redo(self) -> None:
         if self._redo_stack:
             self._undo_stack.append(self._data.clone())
-            self._data = self._redo_stack.pop()
-            self._current_data = get_page_data(
-                self._data, self._current_page, self.chunk_size
-            )
-            self._column_types = get_column_types(self._data)
-            self.layoutChanged.emit()
-            try:
-                self.headerDataChanged.emit(Qt.Orientation.Horizontal, 0, self.columnCount() - 1)
-            except Exception:
-                logger.exception(
-                    "Failed to emit headerDataChanged signal for columns 0 to %d during redo",
-                    self.columnCount() - 1,
-                )
+            self._replace_data(self._redo_stack.pop(), reset_page=False)
 
     def update_data(self, new_df: pl.DataFrame) -> None:
         self.save_state()
-        # Full reset so views refresh headers and cached metadata
-        try:
-            self.beginResetModel()
-        except Exception:
-            logger.exception(
-                "beginResetModel failed; proceeding with manual reset/fallback signals"
-            )
-        self._data = new_df
-        self._max_pages = calculate_max_pages(new_df.height, self.chunk_size)
-        self._current_page = 0
-        self._current_data = get_page_data(
-            self._data, self._current_page, self.chunk_size
-        )
-        self._column_types = get_column_types(self._data)
-        try:
-            self.endResetModel()
-        except Exception:
-            # Fallback to layout/header signals if reset isn't available
-            logger.exception("endResetModel failed; falling back to layout/header signals")
-            self.layoutChanged.emit()
-            try:
-                self.headerDataChanged.emit(Qt.Orientation.Horizontal, 0, self.columnCount() - 1)
-            except Exception:
-                logger.exception(
-                    "Failed to emit headerDataChanged signal during endResetModel fallback for columns 0 to %d",
-                    self.columnCount() - 1,
-                )
+        self._replace_data(new_df, reset_page=True)
 
     def sort_multiple_columns(self, columns: list[str], directions: list[bool]) -> None:
         try:

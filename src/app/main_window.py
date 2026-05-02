@@ -34,6 +34,7 @@ from logic.stats import (
 )
 import webbrowser
 from ai.validator import prepare_transformation_for_execution, TransformationValidationError
+from app.background_tasks import run_in_background
 from app.temp_files import TempFileManager
 import logging
 
@@ -659,7 +660,7 @@ class MainWindow(QMainWindow):
             sel_text = [c for c in selected if c in text]
             opts = dialog.get_options()
 
-            try:
+            def _task():
                 X, feature_names = generate_feature_matrix(
                     df,
                     numeric_cols=sel_numeric,
@@ -669,11 +670,26 @@ class MainWindow(QMainWindow):
                     one_hot=opts.get("one_hot", True),
                     tfidf_max_features=opts.get("tfidf_max_features", 200),
                 )
-                new_df = add_features_to_df(df, X, feature_names)
+                return add_features_to_df(df, X, feature_names)
+
+            self.statusBar().showMessage("Generating features...")
+
+            def _success(new_df):
                 self.model.update_data(new_df)
                 self.update_statistics()
-            except Exception as e:
-                QMessageBox.critical(self, "Featurize Error", f"Failed to featurize: {e}")
+
+            def _error(exc: Exception):
+                QMessageBox.critical(
+                    self, "Featurize Error", f"Failed to featurize: {exc}"
+                )
+
+            run_in_background(
+                self,
+                _task,
+                _success,
+                _error,
+                lambda: self.statusBar().clearMessage(),
+            )
 
     def handle_dimensionality(self):
         try:
@@ -707,7 +723,7 @@ class MainWindow(QMainWindow):
         color_by = opts.get("color_by")
         sample = opts.get("sample", 10000)
 
-        try:
+        def _task():
             # build feature matrix
             try:
                 X = df.select(selected).to_numpy()
@@ -743,7 +759,6 @@ class MainWindow(QMainWindow):
                 emb = compute_umap(X_vis, n_components=n_components)
                 _var_ratio = None
 
-            # plot using plotly if available
             try:
                 import plotly.graph_objects as go
 
@@ -813,16 +828,36 @@ class MainWindow(QMainWindow):
                 tmp_path = self.temp_files.create(suffix=".html", prefix="parqcel_plot_")
 
                 fig.write_html(tmp_path)
-                webbrowser.open(tmp_path)
+                return {"html_path": tmp_path, "emb_shape": emb.shape, "plot_error": None}
             except Exception as e:
+                return {"html_path": None, "emb_shape": emb.shape, "plot_error": str(e)}
+
+        self.statusBar().showMessage("Computing dimensionality reduction...")
+
+        def _success(result):
+            if result.get("html_path"):
+                webbrowser.open(result["html_path"])
+            if result.get("plot_error"):
                 QMessageBox.information(
                     self,
                     "Dimensionality Result",
-                    f"Embedding computed (shape {emb.shape}). Could not render interactive plot: {e}",
+                    f"Embedding computed (shape {result['emb_shape']}). Could not render interactive plot: {result['plot_error']}",
                 )
 
-        except Exception as e:
-            QMessageBox.critical(self, "Dimensionality Error", f"Failed to compute embedding: {e}")
+        def _error(exc: Exception):
+            QMessageBox.critical(
+                self,
+                "Dimensionality Error",
+                f"Failed to compute embedding: {exc}",
+            )
+
+        run_in_background(
+            self,
+            _task,
+            _success,
+            _error,
+            lambda: self.statusBar().clearMessage(),
+        )
 
     def _safe_execute_transformation(self, code: str):
         """Validate and safely execute a transformation code string.

@@ -13,6 +13,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import pyqtSignal
 from typing import Optional
 
+from app.background_tasks import run_in_background
+
 
 class AIAssistantWidget(QWidget):
     """A dockable assistant widget providing chat and suggested transformations.
@@ -69,35 +71,41 @@ class AIAssistantWidget(QWidget):
         if not prompt:
             return
         self._append_chat("User", prompt)
-        # Ask assistant for suggestion
-        try:
-            resp = self.assistant.suggest_transformation(prompt)
+        self.send_btn.setEnabled(False)
+        self.input.setEnabled(False)
+        self.suggestions.clear()
+        self._last_code = None
+        self.apply_btn.setEnabled(False)
+
+        def _success(resp) -> None:
             text = resp.get("text") if isinstance(resp, dict) else str(resp)
             code = resp.get("code") if isinstance(resp, dict) else ""
-        except Exception as e:
-            text = f"(assistant error) {e}"
-            code = ""
-            # clear any previous suggestions to avoid stale apply
+
+            if text:
+                self._append_chat("Assistant", text)
+            if code:
+                self.suggestions.addItem(code)
+                self.suggestions.setCurrentRow(0)
+                self._last_code = code
+                self.apply_btn.setEnabled(True)
+
+        def _error(exc: Exception) -> None:
+            self._append_chat("Assistant", f"(assistant error) {exc}")
             self.suggestions.clear()
             self._last_code = None
             self.apply_btn.setEnabled(False)
 
-        if text:
-            self._append_chat("Assistant", text)
-        if code:
-            # show code as a suggestion and enable apply
-            self.suggestions.clear()
-            self.suggestions.addItem(code)
-            self.suggestions.setCurrentRow(0)
-            self._last_code = code
-            self.apply_btn.setEnabled(True)
-        else:
-            # no code returned -> ensure apply is disabled
-            self.apply_btn.setEnabled(False)
-            if not text:
-                # ensure no stale code is kept
-                self._last_code = None
+        def _finished() -> None:
+            self.send_btn.setEnabled(True)
+            self.input.setEnabled(True)
 
+        run_in_background(
+            self,
+            lambda: self.assistant.suggest_transformation(prompt),
+            _success,
+            _error,
+            _finished,
+        )
         self.input.clear()
 
     def _on_apply(self) -> None:

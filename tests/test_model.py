@@ -36,6 +36,38 @@ def test_sort_and_drop_column(qapp):
     assert "b" not in model._data.columns
 
 
+def test_drop_column_undo_redo_restores_columns(qapp):
+    df = pl.DataFrame({"a": [1, 2], "b": [3, 4], "c": [5, 6]})
+    model = PolarsTableModel(df, chunk_size=10)
+
+    model.drop_column("b")
+    assert model._data.columns == ["a", "c"]
+
+    model.undo()
+    assert model._data.columns == ["a", "b", "c"]
+    assert model.columnCount() == 3
+    assert "b" in model._column_types
+
+    model.redo()
+    assert model._data.columns == ["a", "c"]
+    assert model.columnCount() == 2
+
+
+def test_drop_column_clears_redo_after_new_mutation(qapp):
+    df = pl.DataFrame({"a": [1, 2], "b": [3, 4]})
+    model = PolarsTableModel(df, chunk_size=10)
+
+    model.drop_column("b")
+    model.undo()
+    assert model._data.columns == ["a", "b"]
+
+    model.add_column("c", 0)
+    assert model._data.columns == ["a", "b", "c"]
+
+    model.redo()
+    assert model._data.columns == ["a", "b", "c"]
+
+
 def test_update_data_and_undo_redo(qapp):
     df = pl.DataFrame({"a": [1, 2, 3, 4], "b": ["x", "y", "z", "w"]})
     model = PolarsTableModel(df, chunk_size=10)

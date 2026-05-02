@@ -1,14 +1,14 @@
-Parqcel 0.1.0 — Desktop installer, AI assistant hardening, and stability fixes
+Parqcel 0.1.1 — Windows release packaging, async UX improvements, and reliability fixes
 
-This release provides a standalone Windows desktop installer and several reliability and safety improvements.
+This release refreshes the Windows desktop release flow and packages the latest reliability, safety, and UX improvements.
 
 Highlights:
 
-- Installer: Inno Setup installer (Parqcel-Installer.exe) that packages a standalone PyInstaller desktop build, installs it under `%LocalAppData%\Programs\Parqcel`, and creates Start Menu and optional Desktop shortcuts.
-- Safety: Strict validation for LLM transformation responses with an explicit `InvalidTransformationResponse` error to avoid silently applying malformed payloads.
-- Stability: Centralized temporary file management via `src/app/temp_files.py` to ensure plot and temp artifacts are cleaned up reliably.
-- UX and packaging: Improved AI assistant/settings UX, a standalone Windows packaging flow, `run_parqcel.cmd` launcher for Python users, README updates, and packaged icon assets.
-- Tests: Existing test suite updated with a parser test; run `pytest -q` to verify.
+- Windows packaging: refreshed standalone bundle and installer outputs for both the `base` and `ml` desktop profiles.
+- Responsiveness: featurization, dimensionality reduction, AI assistant requests, and AI backend connection tests now run off the UI thread.
+- Data editing reliability: dropped-column operations now participate correctly in undo/redo.
+- AI safety and docs: stricter malformed-response handling plus README guidance that matches the current assistant scope.
+- Tests: focused pytest coverage added for undo/redo regressions, async UI helpers, backend parsing, and AI settings workflows.
 
 Important notes:
 

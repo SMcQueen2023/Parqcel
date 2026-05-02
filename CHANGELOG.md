@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-05-01
+
+### Added
+- Reusable background task runner for long-running UI actions
+- Focused regression tests for undo/redo, async UI flows, and AI backend/settings behavior
+
+### Changed
+- Split optional AI dependencies into hosted and local install extras
+- Updated README install guidance for standalone Windows release artifacts and current AI scope
+- Refreshed Windows installer branding and release documentation
+
+### Fixed
+- Restored undo/redo support for dropped columns via centralized model reset handling
+- Moved featurization, dimensionality reduction, assistant suggestions, and AI connection tests off the UI thread
+- Removed a PyInstaller exclusion that blocked the ML desktop build profile
+
 ### Added
 - Comprehensive README documentation with installation, usage, and contribution guidelines (PR #58)
 - SECURITY.md and PERFORMANCE.md documentation (PR #57)

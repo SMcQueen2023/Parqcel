@@ -30,7 +30,6 @@ common_excludes = [
     "wheel",
     "distutils",
     "jaraco",
-    "importlib_metadata",
     "more_itertools",
     "zipp",
 ]
