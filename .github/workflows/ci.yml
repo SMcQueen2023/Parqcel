@@ -43,7 +43,8 @@ jobs:
           wheel = glob.glob('wheelhouse/*.whl')[0]
           subprocess.check_call([sys.executable, '-m', 'pip', 'install', wheel + '[${{ matrix.profile }}]'])
       - name: Run tests
-        run: python -m pytest -q
+        timeout-minutes: 5
+        run: python -u -m pytest -v -o faulthandler_timeout=60
       - name: Smoke test installed wheel without source-path injection
         run: python -I scripts/smoke_installed.py
       - name: Record exact environment
