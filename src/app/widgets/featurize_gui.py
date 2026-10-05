@@ -15,7 +15,9 @@ from PyQt6.QtCore import Qt
 
 
 class FeaturizeDialog(QDialog):
-    def __init__(self, column_names, numeric_cols, categorical_cols, text_cols, parent=None):
+    def __init__(
+        self, column_names, numeric_cols, categorical_cols, text_cols, parent=None
+    ):
         super().__init__(parent)
         self.setWindowTitle("Featurize Columns")
         self.resize(500, 400)
@@ -33,7 +35,11 @@ class FeaturizeDialog(QDialog):
             item = QListWidgetItem(col)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             # default: check if column is numeric/categorical/text
-            if col in self.numeric_cols or col in self.categorical_cols or col in self.text_cols:
+            if (
+                col in self.numeric_cols
+                or col in self.categorical_cols
+                or col in self.text_cols
+            ):
                 item.setCheckState(Qt.CheckState.Unchecked)
             else:
                 item.setCheckState(Qt.CheckState.Unchecked)

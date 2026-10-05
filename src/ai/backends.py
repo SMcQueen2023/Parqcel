@@ -10,20 +10,28 @@ from typing import Optional, Dict, Any, Protocol
 import os
 import logging
 import json
+import re
 import importlib.resources as resources
 
+from parqcel.core.transformations import (
+    TransformationValidationError,
+    parse_transformation,
+    plan_to_dict,
+)
+
 logger = logging.getLogger(__name__)
+OPENAI_REQUEST_TIMEOUT_SECONDS = 30.0
 
 
 class InvalidTransformationResponse(ValueError):
     """Raised when an LLM transformation payload fails schema validation."""
 
 
-def _parse_transformation_response(resp_text: str) -> Dict[str, str]:
-    """Parse and validate backend response into {text, code}.
+def _parse_transformation_response(resp_text: str) -> Dict[str, Any]:
+    """Accept declarative operations or a validated legacy Polars expression.
 
-    Expected schema: a JSON object with string fields 'text' and 'code'.
-    Raises InvalidTransformationResponse when validation fails.
+    ``code`` remains the display/apply transport used by the existing widget.
+    Structured responses put canonical plan JSON there, never generated Python.
     """
     try:
         data = json.loads(resp_text)
@@ -36,18 +44,24 @@ def _parse_transformation_response(resp_text: str) -> Dict[str, str]:
         )
 
     text = data.get("text")
-    code = data.get("code")
-
-    errors = []
     if not isinstance(text, str) or not text.strip():
-        errors.append("field 'text' must be a non-empty string")
-    if not isinstance(code, str) or not code.strip():
-        errors.append("field 'code' must be a non-empty string")
+        raise InvalidTransformationResponse("field 'text' must be a non-empty string")
+    try:
+        if "operations" in data:
+            plan = plan_to_dict(
+                parse_transformation({"operations": data["operations"]})
+            )
+            return {"text": text.strip(), "code": json.dumps(plan), **plan}
+        code = data.get("code")
+        if not isinstance(code, str) or not code.strip():
+            raise InvalidTransformationResponse(
+                "field 'code' must be a non-empty string or supply 'operations'"
+            )
+        parse_transformation(code)
+    except TransformationValidationError as exc:
+        raise InvalidTransformationResponse(str(exc)) from exc
 
-    if errors:
-        raise InvalidTransformationResponse("; ".join(errors))
-
-    extra_keys = set(data.keys()) - {"text", "code"}
+    extra_keys = set(data.keys()) - {"text", "code", "operations"}
     if extra_keys:
         logger.debug(
             "Ignoring extra transformation response keys: %s",
@@ -74,7 +88,9 @@ def _load_prompt(template_name: str, **kwargs) -> str:
         prompts = json.loads(data)
         template = prompts.get(template_name)
         if template:
-            return template.format(**kwargs)
+            for name, value in kwargs.items():
+                template = template.replace("{" + name + "}", str(value))
+            return template
     except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
         logger.debug(
             "Could not load prompt template '%s': %s. Using fallback.",
@@ -91,8 +107,11 @@ def _load_prompt(template_name: str, **kwargs) -> str:
     # fallback minimal template
     if template_name == "transformation":
         return (
-            "{prompt}\nReturn a JSON object with keys 'text' and 'code'. "
-            "The 'code' must be a single Python expression that operates on the Polars DataFrame named '{df_name}' using the 'pl' module."
+            "{prompt}\nReturn JSON with 'text' and 'operations'. "
+            "Operations support select (columns), filter (predicate), sort (columns, descending), "
+            "drop (columns), with_columns (expressions), head/tail (count), rename (mapping). "
+            "Expressions are objects with 'op' and 'args': col(name), lit(value), "
+            "add/sub/mul/div/eq/ne/gt/ge/lt/le/and/or(left,right), alias(expression,name)."
         ).format(**kwargs)
     if template_name == "ping":
         return "Respond with OK"
@@ -152,6 +171,7 @@ class OpenAIBackend:
                 model="gpt-3.5-turbo",
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=256,
+                request_timeout=OPENAI_REQUEST_TIMEOUT_SECONDS,
             )
             return resp.choices[0].message.content.strip()
         except AttributeError:
@@ -164,7 +184,10 @@ class OpenAIBackend:
 
         try:
             resp = openai.Completion.create(
-                model="text-davinci-003", prompt=prompt, max_tokens=256
+                model="text-davinci-003",
+                prompt=prompt,
+                max_tokens=256,
+                request_timeout=OPENAI_REQUEST_TIMEOUT_SECONDS,
             )
             return resp.choices[0].text.strip()
         except Exception as e:
@@ -174,7 +197,7 @@ class OpenAIBackend:
     def generate_transformation(
         self, prompt: str, df_name: str = "df"
     ) -> Dict[str, Any]:
-        # Ask the LLM to produce a Polars snippet. The caller must review/apply.
+        # Ask for a declarative plan. The caller must still review/apply.
         user_prompt = _load_prompt("transformation", prompt=prompt, df_name=df_name)
         resp_text = self.generate_text(user_prompt)
         try:
@@ -182,8 +205,6 @@ class OpenAIBackend:
         except InvalidTransformationResponse as exc:
             logger.warning("Invalid transformation response: %s", exc)
             parsed = {"text": f"Invalid transformation response: {exc}", "code": ""}
-        if not parsed.get("code"):
-            parsed["code"] = "# Could not extract code from LLM response"
         return parsed
 
 
@@ -200,34 +221,88 @@ class HuggingFaceBackend:
     def generate_transformation(
         self, prompt: str, df_name: str = "df"
     ) -> Dict[str, Any]:
-        text = self.generate_text(prompt)
+        text = self.generate_text(
+            _load_prompt("transformation", prompt=prompt, df_name=df_name)
+        )
         try:
             parsed = _parse_transformation_response(text)
         except InvalidTransformationResponse as exc:
             logger.warning("Invalid transformation response: %s", exc)
             parsed = {"text": f"Invalid transformation response: {exc}", "code": ""}
-        if not parsed.get("code"):
-            parsed["code"] = (
-                "# HuggingFace backend returned text; manual extraction required"
-            )
         return parsed
 
 
 class DummyBackend:
+    """One offline backend shared by default and configured assistants."""
+
     def generate_text(self, prompt: str) -> str:
         return "(dummy) I can suggest simple transformations like 'top N by column' or 'filter'."
 
     def generate_transformation(
         self, prompt: str, df_name: str = "df"
     ) -> Dict[str, Any]:
-        return {"text": "(dummy) suggested transformation", "code": "# no-op"}
+        top = re.search(r"top\s+(\d+)\s+.*?by\s+(\w+)", prompt, flags=re.IGNORECASE)
+        if top:
+            count, column = int(top.group(1)), top.group(2)
+            return _parse_transformation_response(
+                json.dumps(
+                    {
+                        "text": f"Sort {column} descending and return top {count} rows.",
+                        "operations": [
+                            {"op": "sort", "columns": [column], "descending": True},
+                            {"op": "head", "count": count},
+                        ],
+                    }
+                )
+            )
+        filtered = re.search(
+            r"where\s+(\w+)\s*(==|=)\s*'([\w\s-]+)'", prompt, flags=re.IGNORECASE
+        )
+        if filtered:
+            column, value = filtered.group(1), filtered.group(3)
+            return _parse_transformation_response(
+                json.dumps(
+                    {
+                        "text": f"Filter where {column} equals {value!r}.",
+                        "operations": [
+                            {
+                                "op": "filter",
+                                "predicate": {
+                                    "op": "eq",
+                                    "args": [{"op": "col", "args": [column]}, value],
+                                },
+                            }
+                        ],
+                    }
+                )
+            )
+        return {
+            "text": "Try 'top 5 by revenue' or \"rows where status == 'active'\".",
+            "code": "",
+        }
 
 
-def create_backend(cfg: Dict[str, Any]):
+def _saved_openai_key() -> str | None:
+    """Read the optional OS keyring only when no explicit key was supplied."""
+    try:
+        import keyring
+
+        value = keyring.get_password("parqcel", "openai_api_key")
+        return value if isinstance(value, str) and value else None
+    except Exception:
+        logger.debug("No OpenAI API key could be read from the optional OS keyring")
+        return None
+
+
+def create_backend(cfg: Dict[str, Any]) -> BackendProtocol:
     provider = cfg.get("provider", "dummy")
     logger.info("Creating AI backend provider=%s", provider)
     if provider == "openai":
-        api_key = cfg.get("openai_api_key") or os.environ.get("PARQCEL_OPENAI_API_KEY")
+        api_key = (
+            cfg.get("openai_api_key")
+            or os.environ.get("PARQCEL_OPENAI_API_KEY")
+            or _saved_openai_key()
+        )
         api_base = cfg.get("openai_api_base") or os.environ.get(
             "PARQCEL_OPENAI_API_BASE"
         )
@@ -238,7 +313,7 @@ def create_backend(cfg: Dict[str, Any]):
         )
         return OpenAIBackend(api_key=api_key, api_base=api_base)
     if provider == "hf":
-        model = cfg.get("hf_model", "gpt2")
+        model = cfg.get("hf_model") or "gpt2"
         logger.debug("HuggingFace backend configured with model=%s", model)
         return HuggingFaceBackend(model=model)
     return DummyBackend()

@@ -1,2 +1,2 @@
-polars==1.28.1
-PyQt6==6.9.0
+# Compatibility entry point; pyproject.toml owns dependency definitions.
+.

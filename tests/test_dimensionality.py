@@ -1,5 +1,8 @@
-import numpy as np
 import pytest
+
+np = pytest.importorskip("numpy")
+pytest.importorskip("sklearn")
+
 
 from ds.dimensionality import compute_pca, compute_umap
 

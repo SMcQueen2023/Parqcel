@@ -1,84 +1,82 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
-from typing import List, Dict
+from pathlib import Path
 
-from PyQt6.QtCore import QAbstractTableModel, Qt, QModelIndex
+from PyQt6.QtCore import QAbstractTableModel, Qt, QModelIndex, pyqtSignal
 import polars as pl
-from logic.stats import (
+
+from parqcel.core.statistics import (
     get_column_types,
     get_page_data,
     calculate_max_pages,
     get_column_statistics,
 )
-from datetime import datetime, date
-import logging
-
-logger = logging.getLogger(__name__)
+from parqcel.core.session import DatasetSession
+from parqcel.core.values import is_editable_dtype
 
 
 class PolarsTableModel(QAbstractTableModel):
-    def __init__(self, data: pl.DataFrame, chunk_size: int = 10000) -> None:
-        super().__init__()
-        self._data: pl.DataFrame = data
-        self.chunk_size: int = chunk_size
-        self._current_page: int = 0
-        self._max_pages: int = calculate_max_pages(data.height, chunk_size)
-        self._current_data: pl.DataFrame = get_page_data(
-            data, self._current_page, chunk_size
-        )
-        self._column_types: Dict[str, str] = get_column_types(data)
-        self._undo_stack: List[pl.DataFrame] = []
-        self._redo_stack: List[pl.DataFrame] = []
+    """Qt presentation and pagination for a GUI-independent dataset session."""
 
-    def save_state(self) -> None:
-        self._undo_stack.append(self._data.clone())
-        self._redo_stack.clear()
+    dataset_changed = pyqtSignal()
+    pagination_changed = pyqtSignal()
+
+    def __init__(
+        self,
+        data: pl.DataFrame,
+        chunk_size: int = 10000,
+        *,
+        source_path: str | Path | None = None,
+        session: DatasetSession | None = None,
+    ) -> None:
+        super().__init__()
+        if chunk_size <= 0:
+            raise ValueError("Page size must be positive")
+        self.session = (
+            session if session is not None else DatasetSession(data, source_path)
+        )
+        self.chunk_size = chunk_size
+        self._current_page = 0
+        self._refresh_cache()
+
+    @property
+    def _data(self) -> pl.DataFrame:
+        """Compatibility snapshot for older read-only callers."""
+        return self.session.get_dataframe()
+
+    @property
+    def _undo_stack(self) -> tuple[pl.DataFrame, ...]:
+        return self.session.undo_history
+
+    @property
+    def _redo_stack(self) -> tuple[pl.DataFrame, ...]:
+        return self.session.redo_history
+
+    def _refresh_cache(self, reset_page: bool = False) -> None:
+        frame = self.get_dataframe()
+        self._max_pages = calculate_max_pages(frame.height, self.chunk_size)
+        self._current_page = (
+            0 if reset_page else min(self._current_page, max(0, self._max_pages - 1))
+        )
+        self._current_data = get_page_data(frame, self._current_page, self.chunk_size)
+        self._column_types = get_column_types(frame)
+
+    def _notify_commit(self, reset_page: bool = False) -> None:
+        self.beginResetModel()
+        self._refresh_cache(reset_page)
+        self.endResetModel()
+        self.dataset_changed.emit()
+        self.pagination_changed.emit()
 
     def _replace_data(self, new_df: pl.DataFrame, reset_page: bool = False) -> None:
-        # Full reset so views refresh headers and cached metadata.
-        try:
-            self.beginResetModel()
-        except Exception:
-            logger.exception(
-                "beginResetModel failed; proceeding with manual reset/fallback signals"
-            )
+        self.session.commit(new_df)
+        self._notify_commit(reset_page)
 
-        self._data = new_df
-        self._max_pages = calculate_max_pages(new_df.height, self.chunk_size)
-        if reset_page:
-            self._current_page = 0
-        elif self._max_pages <= 0:
-            self._current_page = 0
-        else:
-            self._current_page = min(self._current_page, self._max_pages - 1)
+    def rowCount(self, parent=QModelIndex()) -> int:
+        return 0 if parent.isValid() else self._current_data.height
 
-        self._current_data = get_page_data(
-            self._data, self._current_page, self.chunk_size
-        )
-        self._column_types = get_column_types(self._data)
-
-        try:
-            self.endResetModel()
-        except Exception:
-            logger.exception(
-                "endResetModel failed; falling back to layout/header signals"
-            )
-            self.layoutChanged.emit()
-            try:
-                self.headerDataChanged.emit(
-                    Qt.Orientation.Horizontal, 0, self.columnCount() - 1
-                )
-            except Exception:
-                logger.exception(
-                    "Failed to emit headerDataChanged signal during endResetModel fallback for columns 0 to %d",
-                    self.columnCount() - 1,
-                )
-
-    def rowCount(self, parent=None) -> int:
-        return self._current_data.height
-
-    def columnCount(self, parent=None) -> int:
-        return self._current_data.width
+    def columnCount(self, parent=QModelIndex()) -> int:
+        return 0 if parent.isValid() else self._current_data.width
 
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
         if not index.isValid():
@@ -88,112 +86,67 @@ class PolarsTableModel(QAbstractTableModel):
                 value = self._current_data[index.row(), index.column()]
                 return str(value) if value is not None else ""
             except IndexError:
-                return ""
+                return None
         return None
 
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
-        if role == Qt.ItemDataRole.DisplayRole:
-            if orientation == Qt.Orientation.Horizontal:
-                col_name = self._data.columns[section]
-                col_type = self._column_types[col_name]
-                return f"{col_name}\n({col_type})"
-            else:
-                return str(section)
-        return None
+        if role != Qt.ItemDataRole.DisplayRole or section < 0:
+            return None
+        if orientation == Qt.Orientation.Horizontal:
+            if section >= self.columnCount():
+                return None
+            col_name = self._current_data.columns[section]
+            return f"{col_name}\n({self._column_types[col_name]})"
+        return str(section + self._current_page * self.chunk_size)
 
     def flags(self, index):
         if not index.isValid():
             return Qt.ItemFlag.NoItemFlags
-        return (
-            Qt.ItemFlag.ItemIsEnabled
-            | Qt.ItemFlag.ItemIsSelectable
-            | Qt.ItemFlag.ItemIsEditable
-        )
+        flags = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+        if is_editable_dtype(self._current_data.dtypes[index.column()]):
+            flags |= Qt.ItemFlag.ItemIsEditable
+        return flags
 
     def setData(
         self, index: QModelIndex, value: object, role: int = Qt.ItemDataRole.EditRole
     ) -> bool:
-        if role == Qt.ItemDataRole.EditRole:
-            self.save_state()
-
-            row = index.row() + self._current_page * self.chunk_size
-            col = index.column()
-            col_name = self._data.columns[col]
-            dtype = self._data.schema[col_name]
-
-            try:
-                if dtype in [pl.Int64, pl.Int32]:
-                    value = int(str(value))
-                elif dtype in [pl.Float64, pl.Float32]:
-                    value = float(str(value))
-                elif dtype == pl.Date:
-                    # Try parsing string to date
-                    if isinstance(value, str):
-                        value = datetime.strptime(value, "%Y-%m-%d").date()
-                    elif not isinstance(value, date):
-                        return False
-                elif dtype == pl.Datetime:
-                    # Try parsing string to datetime
-                    if isinstance(value, str):
-                        value = datetime.fromisoformat(value)
-                    elif not isinstance(value, datetime):
-                        return False
-                else:
-                    value = str(value)
-            except Exception:
-                return False
-
-            col_values = self._data[col_name].to_list()
-            col_values[row] = value
-
-            # Fix: Create series with dtype fallback
-            try:
-                new_col = pl.Series(name=col_name, values=col_values, dtype=dtype)
-            except Exception:
-                # Last-resort fallback if dtype fails, use strict=False
-                new_col = pl.Series(name=col_name, values=col_values, strict=False)
-
-            self._data = self._data.with_columns(new_col)
-            self._current_data = get_page_data(
-                self._data, self._current_page, self.chunk_size
+        if (
+            role != Qt.ItemDataRole.EditRole
+            or not index.isValid()
+            or index.row() >= self.rowCount()
+            or index.column() >= self.columnCount()
+        ):
+            return False
+        try:
+            self.session.set_cell(
+                index.row() + self._current_page * self.chunk_size,
+                self._current_data.columns[index.column()],
+                value,
             )
-
-            self.dataChanged.emit(index, index, [Qt.ItemDataRole.DisplayRole])
-            # Notify views that layout and header data (types) may have changed
-            self.layoutChanged.emit()
-            try:
-                self.headerDataChanged.emit(Qt.Orientation.Horizontal, 0, self.columnCount() - 1)
-            except Exception:
-                logger.exception(
-                    "Failed to emit headerDataChanged signal for columns 0 to %d",
-                    self.columnCount() - 1,
-                )
-            return True
-        return False
+        except (
+            ValueError,
+            TypeError,
+            IndexError,
+            OverflowError,
+            pl.exceptions.PolarsError,
+        ):
+            return False
+        self._notify_commit()
+        return True
 
     def load_next_page(self) -> None:
-        if self._current_page < self._max_pages - 1:
-            self._current_page += 1
-            self._current_data = get_page_data(
-                self._data, self._current_page, self.chunk_size
-            )
-            self.layoutChanged.emit()
+        self.jump_to_page(self._current_page + 1)
 
     def load_previous_page(self) -> None:
-        if self._current_page > 0:
-            self._current_page -= 1
-            self._current_data = get_page_data(
-                self._data, self._current_page, self.chunk_size
-            )
-            self.layoutChanged.emit()
+        self.jump_to_page(self._current_page - 1)
 
     def jump_to_page(self, page_number: int) -> None:
-        if 0 <= page_number < self._max_pages:
+        if 0 <= page_number < self._max_pages and page_number != self._current_page:
+            self.beginResetModel()
             self._current_page = page_number
-            self._current_data = get_page_data(
-                self._data, self._current_page, self.chunk_size
-            )
-            self.layoutChanged.emit()
+            self._refresh_cache()
+            self.endResetModel()
+            self.pagination_changed.emit()
 
     def get_current_page(self) -> int:
         return self._current_page
@@ -202,83 +155,49 @@ class PolarsTableModel(QAbstractTableModel):
         return self._max_pages
 
     def sort_column(self, column_name: str, ascending: bool = True) -> None:
-        self._data = self._data.sort(column_name, descending=not ascending)
-        self._current_data = get_page_data(
-            self._data, self._current_page, self.chunk_size
+        self.sort_multiple_columns([column_name], [ascending])
+
+    def sort_multiple_columns(self, columns: list[str], directions: list[bool]) -> None:
+        self._replace_data(
+            self.get_dataframe().sort(
+                by=columns, descending=[not d for d in directions]
+            )
         )
-        self.layoutChanged.emit()
 
     def drop_column(self, column_name: str) -> None:
-        if column_name not in self._data.columns:
-            return
-
-        self.save_state()
-        self._replace_data(self._data.drop(column_name), reset_page=False)
+        frame = self.get_dataframe()
+        if column_name in frame.columns:
+            self._replace_data(frame.drop(column_name))
 
     def add_column(self, column_name: str, default_value: object | None = None) -> None:
-        if column_name in self._data.columns:
-            return
-
-        self.save_state()
-
-        new_series = pl.Series(
-            name=column_name, values=[default_value] * self._data.height
-        )
-        self._data = self._data.with_columns(new_series)
-
-        self._current_data = get_page_data(
-            self._data, self._current_page, self.chunk_size
-        )
-        self._column_types[column_name] = str(new_series.dtype)
-        self.layoutChanged.emit()
-        try:
-            self.headerDataChanged.emit(Qt.Orientation.Horizontal, 0, self.columnCount() - 1)
-        except Exception:
-            logger.exception(
-                "Failed to emit headerDataChanged signal for columns 0 to %d",
-                self.columnCount() - 1,
+        frame = self.get_dataframe()
+        if column_name not in frame.columns:
+            self._replace_data(
+                frame.with_columns(pl.lit(default_value).alias(column_name))
             )
 
     def get_column_statistics(self, column_name: str) -> str:
-        return get_column_statistics(self._data, column_name)
+        return get_column_statistics(self.get_dataframe(), column_name)
 
     def undo(self) -> None:
-        if self._undo_stack:
-            self._redo_stack.append(self._data.clone())
-            self._replace_data(self._undo_stack.pop(), reset_page=False)
+        if self.session.undo():
+            self._notify_commit()
 
     def redo(self) -> None:
-        if self._redo_stack:
-            self._undo_stack.append(self._data.clone())
-            self._replace_data(self._redo_stack.pop(), reset_page=False)
+        if self.session.redo():
+            self._notify_commit()
 
     def update_data(self, new_df: pl.DataFrame) -> None:
-        self.save_state()
         self._replace_data(new_df, reset_page=True)
 
-    def sort_multiple_columns(self, columns: list[str], directions: list[bool]) -> None:
-        try:
-            logger.info(
-                "Sorting data by columns: %s with directions: %s", columns, directions
-            )
-            sorted_df = self._data.sort(
-                by=columns, descending=[not d for d in directions]
-            )
-            self.update_data(
-                sorted_df
-            )  # <-- use update_data to handle all updates properly
-            logger.debug("Sorting completed and model updated.")
-        except Exception as e:
-            logger.exception("Error sorting multiple columns: %s", e)
-
     def get_column_names(self) -> list[str]:
-        return list(self._data.columns)
+        return list(self._current_data.columns)
 
-    # Safe accessors
     def get_dataframe(self) -> pl.DataFrame:
-        """Return the underlying DataFrame (read-only intention)."""
-        return self._data
+        return self.session.get_dataframe()
 
     def replace_dataframe(self, new_df: pl.DataFrame) -> None:
-        """Replace the underlying DataFrame with a new one (keeps undo snapshot)."""
         self.update_data(new_df)
+
+    def mark_saved(self, revision: int, path: str | Path) -> bool:
+        return self.session.mark_saved(revision, path)

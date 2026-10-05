@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Read-only Parquet preview with asynchronous lazy pages, schema and row counts.
+- Qt-independent dataset sessions with revisions, saved-state tracking and bounded history.
+- Native-memory JSON benchmark for preview, load, edit, undo and statistics.
+- Real event-loop tests for cancellation, widget lifetime, stale results and saving.
+- CI profiles for Windows/Linux base and ML tests, installed-wheel checks, quality gates and Windows base standalone/installer smoke tests.
+
+### Changed
+
+- Desktop and CLI share I/O and transformation services; CSV typing is explicit and defaults to strings.
+- Assistant suggestions use validated declarative plans. Supported legacy Polars syntax is parsed into plans without compiling or executing generated Python.
+- Dataset operations run in background tasks with revision checks, callback cancellation and coordinated shutdown.
+- Cell edits use native Polars slices; undo/redo retention is bounded by snapshot count and estimated size.
+- Documentation distinguishes lazy preview from eager editing and treats Excel as a legacy optional path.
+
+### Fixed
+
+- Invalid edits preserve dtype, data and redo history; single-column sorting participates in undo.
+- Footer, headers, pagination and action state follow committed dataset changes.
+- Unsaved-change prompts and atomic snapshot saves protect ordinary open/close/save workflows.
+- Default saved AI settings load automatically, stored keys can resolve from keyring, and OpenAI SDK requests use per-request timeouts.
+
 ## [0.1.1] - 2026-05-01
 
 ### Added

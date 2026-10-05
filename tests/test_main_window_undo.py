@@ -10,10 +10,7 @@ def test_undo_redo_buttons_restore_dropped_column(qtbot):
     qtbot.addWidget(mw)
 
     df = pl.DataFrame({"a": [1, 2], "b": [3, 4], "c": [5, 6]})
-    mw.model = PolarsTableModel(df, chunk_size=10)
-    mw.table_view.setModel(mw.model)
-    mw.undo_button.clicked.connect(mw.model.undo)
-    mw.redo_button.clicked.connect(mw.model.redo)
+    mw.set_model(PolarsTableModel(df, chunk_size=10))
 
     mw.model.drop_column("b")
     assert mw.model._data.columns == ["a", "c"]

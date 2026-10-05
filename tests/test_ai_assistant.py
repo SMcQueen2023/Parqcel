@@ -25,6 +25,21 @@ def test_assistant_suggest_transformation():
     assert "code" in out
 
 
+def test_default_and_configured_dummy_share_useful_operations():
+    import polars as pl
+    from ai.assistant import Assistant
+    from parqcel.core.transformations import execute_transformation
+
+    frame = pl.DataFrame({"revenue": [1, 9, 5]})
+    for assistant in (Assistant(), assistant_from_config({"provider": "dummy"})):
+        response = assistant.suggest_transformation("Show top 2 by revenue")
+        assert response["operations"]
+        assert execute_transformation(frame, response["code"])["revenue"].to_list() == [
+            9,
+            5,
+        ]
+
+
 def test_ai_widget_interaction(qtbot, monkeypatch):
     from app.widgets.ai_assistant import AIAssistantWidget
 

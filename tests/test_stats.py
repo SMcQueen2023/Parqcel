@@ -79,11 +79,7 @@ def test_generate_statistics_and_column_helpers():
         }
     )
 
-    class DummyModel:
-        def __init__(self, data):
-            self._data = data
-
-    output = generate_statistics(DummyModel(df))
+    output = generate_statistics(df)
     assert "Column: num" in output
     assert "Column: txt" in output
     assert "Column: flag" in output

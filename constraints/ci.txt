@@ -1,0 +1,19 @@
+# Tested direct runtime, ML, QA and Windows build versions.
+# CI also records pip freeze so resolved transitive dependencies are inspectable.
+polars==1.28.1
+PyQt6==6.9.0
+PyQt6-Qt6==6.9.2
+PyQt6-sip==13.13.0
+numpy==2.3.5
+scikit-learn==1.8.0
+plotly==6.5.2
+umap-learn==0.5.11
+black==26.1.0
+ruff==0.14.14
+mypy==1.19.1
+pytest==8.3.4
+pytest-qt==4.4.0
+build==1.6.1
+pyinstaller==6.20.0
+pyinstaller-hooks-contrib==2026.4
+setuptools==80.10.1

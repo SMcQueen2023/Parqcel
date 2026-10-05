@@ -1,4 +1,8 @@
-import numpy as np
+import pytest
+
+np = pytest.importorskip("numpy")
+pytest.importorskip("sklearn")
+
 import polars as pl
 
 from models.polars_table_model import PolarsTableModel
@@ -39,7 +43,11 @@ def test_handle_featurize_uses_background_runner(monkeypatch, qapp):
             return ["a"]
 
         def get_options(self):
-            return {"one_hot": True, "tfidf_max_features": 5, "scale_numeric": "standard"}
+            return {
+                "one_hot": True,
+                "tfidf_max_features": 5,
+                "scale_numeric": "standard",
+            }
 
     monkeypatch.setattr(main_window_module, "run_in_background", run_sync)
     monkeypatch.setattr(featurize_gui_module, "FeaturizeDialog", FakeDialog)

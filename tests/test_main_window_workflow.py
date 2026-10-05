@@ -1,6 +1,6 @@
 import polars as pl
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QFileDialog
+from PyQt6.QtWidgets import QFileDialog, QInputDialog
 
 from app.main_window import MainWindow
 
@@ -14,9 +14,17 @@ def test_main_window_open_edit_drop_undo_save_smoke(qtbot, monkeypatch, tmp_path
     qtbot.addWidget(mw)
 
     monkeypatch.setattr(
+        QInputDialog,
+        "getItem",
+        lambda *args, **kwargs: ("Strings (preserve text)", True),
+    )
+    monkeypatch.setattr(
         QFileDialog,
         "getOpenFileName",
-        lambda *args, **kwargs: (str(input_path), "Data Files (*.parquet *.csv *.xlsx)"),
+        lambda *args, **kwargs: (
+            str(input_path),
+            "Data Files (*.parquet *.csv *.xlsx)",
+        ),
     )
     monkeypatch.setattr(
         QFileDialog,
@@ -25,6 +33,7 @@ def test_main_window_open_edit_drop_undo_save_smoke(qtbot, monkeypatch, tmp_path
     )
 
     mw.open_file()
+    qtbot.waitUntil(lambda: mw.model is not None)
     assert mw.model is not None
     assert mw.model.columnCount() == 2
 
@@ -39,6 +48,7 @@ def test_main_window_open_edit_drop_undo_save_smoke(qtbot, monkeypatch, tmp_path
     assert mw.model._data.columns == ["a", "b"]
 
     mw.save_parquet()
+    qtbot.waitUntil(lambda: output_path.exists() and not mw.model.session.dirty)
     saved = pl.read_parquet(output_path)
     assert saved.columns == ["a", "b"]
     assert saved["a"][0] == "10"

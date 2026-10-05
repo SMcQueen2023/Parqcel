@@ -88,8 +88,13 @@ if ($Clean) {
     )
 
     foreach ($path in $pathsToRemove) {
+        $resolvedTarget = [System.IO.Path]::GetFullPath($path)
+        $workspacePrefix = [System.IO.Path]::GetFullPath($repoRoot).TrimEnd('\') + '\'
+        if (-not $resolvedTarget.StartsWith($workspacePrefix, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Refusing to remove a build path outside the repository: $resolvedTarget"
+        }
         if (Test-Path $path) {
-            Remove-Item -Recurse -Force $path
+            Remove-Item -LiteralPath $resolvedTarget -Recurse -Force
         }
     }
 }
@@ -102,6 +107,7 @@ try {
     Write-Host "Building Parqcel desktop bundle with profile '$Profile'"
     Write-Host "Using Python executable '$pythonExe'"
     & $pythonExe @pythonArgs -m PyInstaller --noconfirm (Join-Path $repoRoot "Parqcel.spec")
+    if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed with exit code $LASTEXITCODE" }
 
     $desktopOutput = Join-Path $repoRoot "dist\Parqcel\Parqcel.exe"
     if (-not (Test-Path $desktopOutput)) {
@@ -117,6 +123,7 @@ try {
         }
 
         & $iscc (Join-Path $repoRoot "installer\parqcel.iss")
+        if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE" }
         Write-Host "Installer created at $(Join-Path $repoRoot "installer\dist\Parqcel-Installer.exe")"
     }
 }

@@ -6,7 +6,7 @@ import pytest
 # Must set before importing PyQt modules.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
 SRC_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
 if SRC_PATH not in sys.path:
@@ -19,3 +19,14 @@ def qapp():
     if app is None:
         app = QApplication([])
     return app
+
+
+@pytest.fixture(autouse=True)
+def dismiss_unsaved_changes(monkeypatch):
+    # Headless test cleanup must never wait for a modal close confirmation.
+    # Tests of save/cancel behavior override this default explicitly.
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args, **kwargs: QMessageBox.StandardButton.Discard,
+    )

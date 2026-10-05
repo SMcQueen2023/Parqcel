@@ -26,7 +26,9 @@ def test_ai_settings_test_connection_openai_success(qtbot, monkeypatch):
         return FakeBackend()
 
     monkeypatch.setattr("app.widgets.ai_settings.run_in_background", _run_sync)
-    monkeypatch.setattr("app.widgets.ai_settings.load_config", lambda: {"provider": "dummy"})
+    monkeypatch.setattr(
+        "app.widgets.ai_settings.load_config", lambda: {"provider": "dummy"}
+    )
     monkeypatch.setattr("ai.backends.create_backend", fake_create_backend)
     monkeypatch.setattr(
         "app.widgets.ai_settings.QMessageBox.information",
@@ -60,7 +62,9 @@ def test_ai_settings_test_connection_hf_failure(qtbot, monkeypatch):
     messages = []
 
     monkeypatch.setattr("app.widgets.ai_settings.run_in_background", _run_sync)
-    monkeypatch.setattr("app.widgets.ai_settings.load_config", lambda: {"provider": "hf"})
+    monkeypatch.setattr(
+        "app.widgets.ai_settings.load_config", lambda: {"provider": "hf"}
+    )
     monkeypatch.setattr(
         "ai.backends.create_backend",
         lambda cfg: (_ for _ in ()).throw(RuntimeError("backend unavailable")),

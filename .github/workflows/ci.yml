@@ -2,28 +2,101 @@ name: CI
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [main, master]
   pull_request:
-    branches: [ main, master ]
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+env:
+  PIP_CONSTRAINT: ${{ github.workspace }}/constraints/ci.txt
+
 jobs:
   test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-latest, python: '3.11', profile: dev}
+          - {os: windows-latest, python: '3.11', profile: dev}
+          - {os: ubuntu-latest, python: '3.13', profile: 'dev,ml'}
+          - {os: windows-latest, python: '3.13', profile: 'dev,ml'}
+    runs-on: ${{ matrix.os }}
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install Linux Qt libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1-mesa-dri
+      - name: Build wheel
+        run: python -m pip wheel . --no-deps -w wheelhouse
+      - name: Install wheel and selected profile
+        shell: python
+        run: |
+          import glob, subprocess, sys
+          wheel = glob.glob('wheelhouse/*.whl')[0]
+          subprocess.check_call([sys.executable, '-m', 'pip', 'install', wheel + '[${{ matrix.profile }}]'])
+      - name: Run tests
+        run: python -m pytest -q
+      - name: Smoke test installed wheel without source-path injection
+        run: python -I scripts/smoke_installed.py
+      - name: Record exact environment
+        run: python -m pip freeze > resolved-environment.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: environment-${{ matrix.os }}-${{ matrix.python }}
+          path: resolved-environment.txt
+
+  quality:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install system dependencies for PyQt6
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libegl1 libgl1-mesa-dri
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install Python deps and project (dev extras)
+      - run: python -m pip install '.[dev,ml]'
+      - run: python -m ruff check src tests scripts
+      - run: python -m black --check src tests scripts
+      - run: python -m mypy src
+
+  desktop-package:
+    needs: [test, quality]
+    runs-on: windows-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install '.[desktop-build]'
+      - name: Build desktop and installer
+        shell: pwsh
+        run: ./scripts/build_windows_desktop.ps1 -Profile base -Installer
+      - name: Smoke test standalone desktop
+        shell: pwsh
         run: |
-          python -m pip install --upgrade pip
-          # Install NumPy early to satisfy any build-time imports during project install
-          python -m pip install numpy
-          python -m pip install .[dev]
-          python -m pip install scikit-learn
-      - name: Run tests
-        run: pytest -q
+          $app = Start-Process -FilePath './dist/Parqcel/Parqcel.exe' -ArgumentList '--smoke-test' -WindowStyle Hidden -PassThru
+          if (-not $app.WaitForExit(60000)) { $app.Kill(); throw 'Desktop smoke test timed out' }
+          if ($app.ExitCode -ne 0) { throw "Desktop smoke test failed: $($app.ExitCode)" }
+      - name: Smoke test installer in isolated runner directory
+        shell: pwsh
+        run: |
+          $installDir = Join-Path $env:RUNNER_TEMP 'parqcel-install-smoke'
+          $setup = Start-Process -FilePath './installer/dist/Parqcel-Installer.exe' -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/NOICONS', "/DIR=`"$installDir`"") -WindowStyle Hidden -Wait -PassThru
+          if ($setup.ExitCode -ne 0) { throw 'Installer failed' }
+          $app = Start-Process -FilePath (Join-Path $installDir 'Parqcel.exe') -ArgumentList '--smoke-test' -WindowStyle Hidden -PassThru
+          if (-not $app.WaitForExit(60000)) { $app.Kill(); throw 'Installed app timed out' }
+          if ($app.ExitCode -ne 0) { throw 'Installed app failed' }
+          $uninstall = Start-Process -FilePath (Join-Path $installDir 'unins000.exe') -ArgumentList '/VERYSILENT' -WindowStyle Hidden -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) { throw 'Uninstall failed' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: parqcel-windows-base
+          path: installer/dist/Parqcel-Installer.exe

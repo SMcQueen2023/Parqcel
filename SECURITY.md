@@ -1,238 +1,76 @@
-# Security Documentation
+# Security
 
-This document outlines security considerations, threat models, and best practices for Parqcel.
+Parqcel's optional assistant proposes dataframe transformations for user review. Application code parses suggestions into a fixed operation plan; it does not compile or execute generated Python.
 
-## Executive Summary
+## Transformation boundary
 
-Parqcel is a desktop application for data analysis with an optional AI assistant feature. The primary security concern is the **execution of LLM-generated Python code** to transform data. While comprehensive validation is in place, users should understand the risks and limitations.
+The implementation is in [parqcel/core/transformations.py](src/parqcel/core/transformations.py). Plans contain an `operations` list with supported select, filter, sort, drop, with-columns, head, tail and rename steps. Expressions use validated operation names and JSON arguments.
 
-**Risk Level**: Medium (when AI features are enabled)  
-**Mitigation**: AST-based code validation, restricted execution environment, user review workflow
+For example:
 
-## Threat Model
-
-### Assets
-1. **User Data**: Parquet/CSV/Excel files containing potentially sensitive information
-2. **System Resources**: CPU, memory, filesystem access
-3. **API Keys**: OpenAI/HuggingFace credentials (stored in OS keyring)
-
-### Threat Actors
-1. **Malicious LLM Output**: AI backend returns malicious code designed to exploit the application
-2. **Compromised Dependencies**: Third-party libraries with known vulnerabilities
-3. **User Error**: Accidental execution of dangerous operations on sensitive data
-
-### Attack Vectors
-
-#### 1. Code Injection via LLM (Primary Risk)
-**Description**: AI assistant generates code that escapes validation and executes arbitrary operations.
-
-**Example Attacks**:
-- Accessing system variables via dunder attributes
-- Importing modules to execute system commands
-- Reading/writing arbitrary files
-- Network operations
-
-**Mitigation**:
-- AST-based validation (see `ai/validator.py`)
-- Whitelist approach: only `df` and `pl` operations allowed
-- No import statements, lambdas, or comprehensions
-- Dunder attribute access blocked
-
-**Limitations**:
-- AST validation is not a complete sandbox
-- Does not protect against resource exhaustion (infinite loops, memory bombs)
-- New Python features may bypass validation
-- Validation logic itself may have bugs
-
-#### 2. Dependency Vulnerabilities
-**Description**: Known CVEs in dependencies (PyQt6, Polars, numpy, scikit-learn, etc.)
-
-**Mitigation**:
-- Regular dependency updates
-- Monitor security advisories
-- Pin specific versions in production
-- Use `gh-advisory-database` tool before adding dependencies
-
-#### 3. API Key Exposure
-**Description**: OpenAI/HuggingFace keys leaked via logs, config files, or error messages
-
-**Mitigation**:
-- Keys stored in OS keyring (not plaintext config)
-- Logs mask credential values
-- Environment variables not echoed in debug output
-
-## Validation Details (`ai/validator.py`)
-
-### Allowed Operations
-The validator permits only these AST node types:
-- Basic expressions: constants, tuples, lists, dicts, sets
-- Comparisons and boolean operations
-- Binary/unary arithmetic operations
-- Attribute access/subscripting on `df` or `pl` only
-- Function calls on `df` or `pl` chains only
-- Variable assignments (temp variables allowed)
-
-### Explicitly Blocked
-- Import statements (any form)
-- Lambda functions
-- List/dict/set comprehensions, generator expressions
-- Async/await syntax
-- Dunder attributes (`__globals__`, `__dict__`, `__class__`, etc.)
-- Direct function calls (e.g., `print()`, `open()`)
-- Attribute access on unauthorized names
-
-### Example: Safe vs. Unsafe Code
-
-**Safe (Passes Validation)**:
-```python
-df.select(['col1', 'col2'])
-df.filter(pl.col('age') > 18)
-df.with_columns((pl.col('a') + pl.col('b')).alias('sum'))
-result = df.sort('name')  # Temp variable allowed
+```json
+{
+  "operations": [
+    {
+      "op": "filter",
+      "predicate": {
+        "op": "gt",
+        "args": [{"op": "col", "args": ["age"]}, 18]
+      }
+    },
+    {"op": "sort", "columns": ["age"], "descending": true},
+    {"op": "head", "count": 10}
+  ]
+}
 ```
 
-**Unsafe (Blocked by Validator)**:
-```python
-import os; os.system('rm -rf /')  # Import blocked
-df.__class__.__bases__  # Dunder attribute blocked
-eval('malicious code')  # eval is not df/pl
-print(df)  # Direct function call blocked
-[x for x in df]  # Comprehension blocked
+A compatibility parser also accepts a restricted dataframe expression or a single assignment to `df` or `result`, such as `df.filter(pl.col("age") > 18)`. It translates syntax to the same validated plan. It is not a general Python interpreter.
+
+The dispatcher supports only explicitly implemented operations. Suggestions cannot request arbitrary imports, attribute lookup, callbacks, file/network I/O, joins, loops or general Python calls. Unknown fields, invalid arguments and excessive text/structure are rejected. The legacy `ai.validator` API remains an inspection adapter; application execution uses the core plan executor.
+
+This limits available capabilities, not the CPU or memory used by legitimate Polars work. A valid sort, aggregation or expression over a large dataset can still exhaust resources. There is no subprocess sandbox or enforced process-memory budget. Parser defects and vulnerabilities in Polars, Qt or optional dependencies remain possible.
+
+## Data and network use
+
+The desktop assistant sends the user's prompt to the selected backend. It does not automatically add dataframe rows or column schema, and it does not redact text that a user enters. A prompt may therefore disclose any sensitive information included in it.
+
+The dummy backend is offline. The OpenAI backend uses the configured service endpoint. The Hugging Face backend uses a local transformers pipeline, which may download model weights. Review provider policies and deployment configuration before entering confidential content.
+
+The OpenAI backend sets a 30-second timeout for each SDK request. Its compatibility fallback may issue a second request; this is not a 30-second total deadline. Local model loading and inference can take longer.
+
+## Credentials and configuration
+
+Settings are loaded from `~/.parqcel/config.json`, or the file selected by `PARQCEL_CONFIG_FILE`. Nonempty provider environment variables override file values. The GUI excludes API keys when saving settings.
+
+The OpenAI factory resolves an explicit/configured key, then an environment key, then the optional OS keyring. When keyring is unavailable, the GUI does not fall back to writing secrets into its JSON file. Users can still place a key in a manually managed configuration file; avoid doing so.
+
+Configuration diagnostics avoid printing credential values. Backend error messages can contain provider details; inspect logs before sharing them. Do not commit credentials or sensitive datasets.
+
+## Dataset integrity and task lifetime
+
+Cell values are validated before a session commit. Rejected edits preserve data, dtype and undo/redo state. History has bounded retention and is not a backup.
+
+Background results apply only if the originating dataset and revision are still current. Cancellation discards callback delivery without forcibly stopping the worker. It does not undo side effects such as an in-progress file save. Shutdown waits for running tasks before cleaning temporary artifacts.
+
+Parquet exports write a sibling temporary file and replace the destination after output completes. This avoids directly truncating a destination during normal write failure. It is not a backup, access-control mechanism or guarantee against every filesystem/power-loss scenario.
+
+Dirty-state prompts help prevent accidental loss when opening another dataset or closing the editor. Save completion marks a session clean only when it acknowledges the same revision that was written.
+
+## Developer checks
+
+Keep generated suggestions data-only. New operations need explicit argument validation, an owned dispatcher implementation and rejection tests for unsupported syntax/capabilities.
+
+```bash
+python -m pytest tests/test_transformations.py tests/test_validator.py tests/test_ai_execute.py
+python -m pytest tests/test_background_tasks.py tests/test_desktop_lifecycle.py tests/test_desktop_save.py
 ```
 
-### Edge Cases and Limitations
+Review dependency changes and provider error handling. Use real event-loop tests for cancellation, widget destruction and stale completion; synchronous mocks cannot establish thread-lifecycle safety.
 
-#### Known Safe Bypasses: NONE CURRENTLY KNOWN
-If you discover a validation bypass, please report it immediately.
+## Reporting a vulnerability
 
-#### Resource Exhaustion (NOT PROTECTED)
-```python
-# These pass validation but are dangerous:
-df.join(df, how='cross')  # Cartesian product -> memory exhaustion
-while True: pass  # Infinite loop
-df.select([pl.col('x') ** 999999])  # CPU-intensive
-```
+Use the repository's [GitHub Security Advisories](https://github.com/SMcQueen2023/Parqcel/security/advisories) to report privately. Include affected versions, a minimal reproduction and the data/system impact without exposing credentials or real sensitive data.
 
-**Recommendation**: 
-- Set timeout for code execution (not currently implemented)
-- Monitor resource usage during execution
-- Only run AI suggestions on non-production data
+If a credential is exposed, revoke it through the provider, replace it and review recent usage.
 
-## Secure Usage Guidelines
-
-### For Users
-
-1. **Treat AI Suggestions as Untrusted Input**
-   - Always review generated code before executing
-   - Understand what each operation does
-   - Test on sample data first
-
-2. **Data Classification**
-   - Do NOT use AI features on:
-     - Personally Identifiable Information (PII)
-     - Financial records
-     - Healthcare data (PHI)
-     - Trade secrets
-   - AI features send column names to external APIs
-
-3. **API Key Management**
-   - Use read-only API keys when possible
-   - Rotate keys periodically
-   - Monitor API usage for anomalies
-   - Never share keys or commit to version control
-
-4. **Network Security**
-   - AI features require internet access
-   - Data is NOT sent to AI providers (only column names and operations)
-   - Use VPN in sensitive environments
-
-### For Developers
-
-1. **Before Adding Dependencies**
-   ```bash
-   # Check for known vulnerabilities
-   python -m gh_advisory_database --ecosystem pip \
-       --name package_name --version X.Y.Z
-   ```
-
-2. **Code Review Checklist**
-   - [ ] No new `exec()` or `eval()` calls
-   - [ ] No dynamic import statements
-   - [ ] User input is validated
-   - [ ] File operations use safe paths
-   - [ ] API keys never logged
-
-3. **Security Testing**
-   ```bash
-   # Run security-focused tests
-   pytest tests/test_validator.py -v
-   
-   # Static analysis
-   bandit -r src/
-   
-   # Check for common issues
-   ruff check src/ --select S  # Security rules
-   ```
-
-## Incident Response
-
-### If You Discover a Validation Bypass
-
-1. **DO NOT** publicly disclose until patched
-2. Report via private security advisory on GitHub
-3. Include minimal reproduction code
-4. Assess scope: local files? network access? system compromise?
-
-### If API Keys Are Compromised
-
-1. Immediately revoke keys in provider dashboard
-2. Rotate to new keys
-3. Audit recent API usage for suspicious activity
-4. Check for unauthorized data access
-
-## Security Roadmap
-
-### Implemented ✅
-- [x] AST-based code validation
-- [x] Keyring-based credential storage
-- [x] Comprehensive validation test suite
-- [x] Security documentation
-
-### Planned 📋
-- [ ] Execution timeout for AI code (prevent infinite loops)
-- [ ] Memory limits for operations
-- [ ] Audit logging for AI executions
-- [ ] Sandbox using subprocess isolation
-- [ ] Rate limiting for AI API calls
-
-### Under Consideration 🤔
-- [ ] RestrictedPython integration (alternative validator)
-- [ ] Process-based isolation (run AI code in separate process)
-- [ ] Differential privacy for data statistics
-- [ ] End-to-end encryption for API communication
-
-## References
-
-### Security Standards
-- [OWASP Top 10](https://owasp.org/www-project-top-ten/)
-- [CWE-94: Code Injection](https://cwe.mitre.org/data/definitions/94.html)
-- [CWE-502: Deserialization of Untrusted Data](https://cwe.mitre.org/data/definitions/502.html)
-
-### Python Security
-- [Python Security Best Practices](https://python.readthedocs.io/en/stable/library/security_warnings.html)
-- [Bandit Security Linter](https://bandit.readthedocs.io/)
-
-### Similar Projects
-- [RestrictedPython](https://github.com/zopefoundation/RestrictedPython)
-- [PyPy Sandboxing](https://doc.pypy.org/en/latest/sandbox.html)
-
-## Contact
-
-For security concerns or vulnerability reports:
-- GitHub Security Advisories: [Create Advisory](https://github.com/SMcQueen2023/Parqcel/security/advisories)
-- Email: See repository owner profile
-
----
-
-**Last Updated**: 2026-02-04  
-**Next Review**: Quarterly or after significant changes
+Last updated: 2026-10-04.

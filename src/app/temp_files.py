@@ -18,9 +18,13 @@ class TempFileManager:
         self._lock = threading.Lock()
         atexit.register(self.cleanup)
 
-    def create(self, suffix: str = "", prefix: str = "parqcel_", directory: str | None = None) -> str:
+    def create(
+        self, suffix: str = "", prefix: str = "parqcel_", directory: str | None = None
+    ) -> str:
         """Create a NamedTemporaryFile path and register it for cleanup."""
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix, prefix=prefix, dir=directory)
+        tmp = tempfile.NamedTemporaryFile(
+            delete=False, suffix=suffix, prefix=prefix, dir=directory
+        )
         path = tmp.name
         tmp.close()
         self.track(path)

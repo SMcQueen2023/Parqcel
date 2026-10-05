@@ -1,6 +1,7 @@
 """Configuration helpers for AI backends.
 
-Reads configuration from environment variables and an optional JSON file.
+Reads saved settings from ~/.parqcel/config.json by default. PARQCEL_CONFIG_FILE
+selects a different file; nonempty setting environment variables override it.
 Supported env vars:
 - PARQCEL_AI_PROVIDER: 'openai' | 'hf' | 'dummy' (default: 'dummy')
 - PARQCEL_OPENAI_API_KEY
@@ -8,6 +9,7 @@ Supported env vars:
 - PARQCEL_HF_MODEL
 - PARQCEL_CONFIG_FILE
 """
+
 from __future__ import annotations
 
 import os
@@ -21,18 +23,21 @@ logger = logging.getLogger(__name__)
 def _load_file(path: str) -> Dict[str, Any]:
     try:
         with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
+            data = json.load(f)
+    except (OSError, ValueError):
         return {}
+    if not isinstance(data, dict):
+        logger.warning("Ignoring AI config file with a non-object JSON value: %s", path)
+        return {}
+    return data
 
 
 def load_config() -> Dict[str, Any]:
-    cfg: Dict[str, Any] = {}
-    # optional config file
-    cfg_file = os.environ.get("PARQCEL_CONFIG_FILE")
-    if cfg_file:
-        cfg.update(_load_file(cfg_file))
-        logger.info("Loaded AI config overrides from %s", cfg_file)
+    cfg_file = os.environ.get("PARQCEL_CONFIG_FILE") or os.path.join(
+        os.path.expanduser("~"), ".parqcel", "config.json"
+    )
+    cfg = _load_file(cfg_file)
+    logger.debug("Read AI configuration from %s", cfg_file)
 
     # environment overrides
     env_map = {

@@ -14,15 +14,14 @@ import os
 import json
 import logging
 
+from ai.config import load_config
+from app.background_tasks import cancel_tasks, run_in_background
+
 try:
     import keyring
 except Exception:
     keyring = None
 logger = logging.getLogger(__name__)
-
-
-from ai.config import load_config
-from app.background_tasks import run_in_background
 
 
 class AISettingsDialog(QDialog):
@@ -39,7 +38,7 @@ class AISettingsDialog(QDialog):
         prov_layout = QHBoxLayout()
         prov_layout.addWidget(QLabel("Provider:"))
         self.provider = QComboBox()
-        self.provider.addItems(["dummy", "openai", "hf"]) 
+        self.provider.addItems(["dummy", "openai", "hf"])
         self.provider.setCurrentText(cfg.get("provider", "dummy"))
         prov_layout.addWidget(self.provider)
         layout.addLayout(prov_layout)
@@ -104,6 +103,11 @@ class AISettingsDialog(QDialog):
             "hf_model": self.hf_input.text().strip() or None,
         }
 
+    def done(self, result: int) -> None:
+        cancel_tasks(self)
+        self.test_btn.setEnabled(True)
+        super().done(result)
+
     def _on_save(self):
         cfg = self._current_config()
         # save config file to user home
@@ -121,7 +125,11 @@ class AISettingsDialog(QDialog):
                 try:
                     keyring.set_password("parqcel", "openai_api_key", key)
                 except Exception:
-                    QMessageBox.warning(self, "Keyring Error", "Failed to store API key in OS keyring. It will not be saved.")
+                    QMessageBox.warning(
+                        self,
+                        "Keyring Error",
+                        "Failed to store API key in OS keyring. It will not be saved.",
+                    )
             else:
                 # Do NOT write API keys to plaintext config as a fallback.
                 # Instead, warn the user and ask them to install `keyring`.
@@ -168,9 +176,13 @@ class AISettingsDialog(QDialog):
             ok = bool(result.get("ok"))
             elapsed = float(result.get("elapsed", 0.0))
             if ok:
-                QMessageBox.information(self, "Test Succeeded", f"Connection OK (latency {elapsed:.2f}s)")
+                QMessageBox.information(
+                    self, "Test Succeeded", f"Connection OK (latency {elapsed:.2f}s)"
+                )
             else:
-                QMessageBox.warning(self, "Test Result", "Backend did not indicate success")
+                QMessageBox.warning(
+                    self, "Test Result", "Backend did not indicate success"
+                )
 
         def _error(exc: Exception) -> None:
             message = str(exc)

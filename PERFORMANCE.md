@@ -1,148 +1,54 @@
-# Performance Considerations for Parqcel
+# Performance
 
-This document outlines performance considerations and optimization opportunities for working with large datasets in Parqcel.
+## Preview versus editing
 
-## Current Performance Characteristics
+**File → Preview Parquet...** opens metadata and reads requested pages asynchronously. The default preview page contains 1,000 rows. A lazy Parquet scan collects a slice rather than retaining the whole dataset, and the preview has no edit history. It detects ordinary file changes and asks you to reopen the preview.
 
-### Memory Usage
+Page size is not a hard memory limit: Parquet row-group decoding, wide columns and reader buffers can require more memory than the displayed rows. Metadata work and a row-count query also take time. Rapid page changes can leave earlier reads finishing in the background, although their stale results are discarded.
 
-#### Undo/Redo System
-- **Current Implementation**: Uses `df.clone()` to create full dataframe copies for each undo/redo state
-- **Memory Impact**: For multi-GB files, each undo operation creates a complete copy in memory
-- **Recommendation**: Consider implementing:
-  - Transaction-based diffs (store only changes, not full copies)
-  - Copy-on-write (COW) semantics leveraging Polars' internal optimizations
-  - Configurable undo stack depth to limit memory growth
+**File → Open File** eagerly loads the complete dataset into memory for editing. Its 10,000-row display pages reduce the number of displayed rows, not the size of the loaded dataframe. Filtering after opening does not avoid the initial load. CSV strings preserve text by default; choosing type inference changes both behavior and memory requirements.
 
-#### Data Model Operations
-- **Current**: `PolarsTableModel.data()` and `setData()` may call `to_list()` on large columns
-- **Impact**: For columns with millions of rows, this creates Python list objects in memory
-- **Optimization**: Use Polars expressions directly where possible; avoid materialization
+## Editing and history
 
-### Parsing Performance
+`DatasetSession` owns dataframe state independently of Qt. Cell edits use native Polars slices and a replacement value, avoiding full-column conversion to Python lists. Input is validated before committing, including dtype and representable range.
 
-#### DateTime Parsing (`logic/parsers.py`)
-The `convert_series_to_datetime()` function tries multiple format strings sequentially:
-- **Complexity**: O(n × m) where n = number of rows, m = number of format attempts
-- **Current Optimization**: 
-  - Sample-based format detection (first 500 rows)
-  - Vectorized parsing with Polars (fast path)
-  - Python fallback only for remaining nulls
-- **Further Optimizations**:
-  - Memoize detected format per column for repeated operations
-  - Batch format detection across multiple columns
-  - Allow users to specify format hints to skip detection
+Polars clones share buffers; a history snapshot is not necessarily a deep copy of every column. The [Polars clone documentation](https://docs.pola.rs/api/python/stable/reference/dataframe/api/polars.DataFrame.clone.html) describes this operation as avoiding data copying. Operations that replace buffers still increase retained memory, particularly repeated sorting, conversion and feature generation.
 
-### UI Responsiveness
+Each undo/redo stack defaults to at most **20 snapshots** and **256 MiB of estimated dataframe sizes**. This estimate conservatively counts shared buffers more than once and is not a process-memory cap. A snapshot larger than the budget is not retained. History limits are session constructor settings, not a preferences dialog.
 
-#### Long-Running Operations
-Currently, operations like featurization, dimensionality reduction, and datetime parsing are synchronous:
-- **Impact**: UI freezes during long operations
-- **Recommendation**: 
-  - Use `QThread` or `asyncio` for background processing
-  - Add progress indicators for operations > 1 second
-  - Allow cancellation of long-running operations
+## Background work
 
-## Optimization Strategies
+Opening, saving, filtering, sorting, type conversion, statistics, ML operations and assistant requests use background tasks. Callbacks run in the GUI thread. Dataset identity and revision checks prevent late results from overwriting newer edits or another open file. Statistics caches are invalidated by dataset changes.
 
-### For Large Files (>1GB)
+Cancellation suppresses callbacks; it does not forcibly interrupt native calculations, network requests or file output. Closing waits asynchronously for active tasks to finish. A slow external request can therefore delay shutdown. The OpenAI backend uses a timeout per request, but fallback requests and local inference do not create a single guaranteed total deadline.
 
-1. **Lazy Loading**
-   - Current: Entire file loaded into memory
-   - Proposed: Stream rows in chunks, load only visible pages
-   - Benefit: Reduced initial load time and memory footprint
+Saving captures a dataframe snapshot and writes through a temporary sibling file before replacing the destination. An edit during saving remains dirty. Temporary output consumes additional disk space; cancellation can still leave the requested save completed.
 
-2. **Column Statistics Caching**
-   - Current: Statistics recomputed on each access
-   - Proposed: Cache computed stats, invalidate on data changes
-   - Benefit: Faster stats panel updates
+## Measure your workload
 
-3. **Efficient Filtering**
-   - Current: Filters create new DataFrame each time
-   - Optimization: Chain filters using Polars lazy API
-   - Benefit: Reduced memory allocations
+From an installed development checkout:
 
-### For Repeated Operations
+```bash
+python scripts/benchmark_desktop.py --rows 100000
+python scripts/benchmark_desktop.py --rows 1000000
+python scripts/benchmark_desktop.py --input data.parquet
+python scripts/benchmark_desktop.py --input data.csv --csv-types infer
+```
 
-1. **Format Detection Cache**
-   ```python
-   # Example: Cache detected datetime formats per column
-   _format_cache = {}  # {column_name: format_string}
-   ```
+The benchmark reports JSON containing:
 
-2. **Feature Engineering Pipeline**
-   - Store intermediate featurization results
-   - Reuse TF-IDF vectorizers across runs
-   - Cache fitted encoders for categorical columns
+- Python, Polars and platform versions, dataset dimensions and estimated dataframe bytes.
+- Parquet metadata, first-page and last-page timings where applicable.
+- Eager load, cell edit, undo and statistics timings.
+- Whether undo retained a usable snapshot.
+- Native process peak resident memory, including Polars allocations.
 
-## Best Practices for Users
+Windows uses `PeakWorkingSetSize`; Linux/macOS use `resource.getrusage`. Values are cumulative process high-water marks, not per-operation allocation deltas. Preview and eager measurements share a process, so their peaks are not independent memory comparisons. Use separate runs and representative files when comparing changes.
 
-### Working with Large Datasets
+Generated numeric fixtures are written in a temporary directory by a separate process, keeping fixture-generation allocations out of the measured process. The default is 100,000 rows. Existing input files are read without modification, and empty or unsupported edit columns produce explicit skipped metrics.
 
-1. **Memory Budget**
-   - Expect ~3x file size in RAM (file + loaded data + undo buffer)
-   - Limit undo depth for files > 1GB
-   - Close other applications when working with large files
+These measurements exclude GUI painting, user interaction, cold-storage guarantees and provider latency. Repeat runs and report file shape, compression, cache conditions and hardware before drawing performance conclusions. Dense ML feature matrices, high-cardinality text/categorical columns and global statistics may dominate memory even when page navigation is cheap.
 
-2. **Performance Tips**
-   - Use filters to reduce working set size
-   - Avoid frequent type conversions on large columns
-   - Save intermediate results to Parquet for faster reloading
+Feature generation checks a default 256 MiB budget before allocating dense numeric/categorical matrices, densifying TF-IDF, or concatenating the result. It estimates dense components plus output, not total process memory; source data, sparse matrices and estimator scratch space are additional. Reduce rows/features when this guard rejects an operation. Projection sampling occurs before NumPy conversion.
 
-3. **DateTime Parsing**
-   - For consistent date formats, first row detection is usually sufficient
-   - If parsing is slow, consider preprocessing dates in a script
-   - Use ISO 8601 format (YYYY-MM-DD) for fastest parsing
-
-## Profiling Opportunities
-
-To identify bottlenecks in production usage:
-
-1. **Add Performance Metrics**
-   ```python
-   import time
-   start = time.perf_counter()
-   # operation
-   elapsed = time.perf_counter() - start
-   logger.info(f"Operation took {elapsed:.3f}s")
-   ```
-
-2. **Memory Profiling**
-   - Use `tracemalloc` to track memory allocations
-   - Profile undo/redo operations specifically
-
-3. **UI Profiling**
-   - Track time between user action and UI update
-   - Target: <100ms for responsive interactions
-
-## Future Optimizations
-
-### Short-term (Low-hanging fruit)
-- [ ] Cache column statistics
-- [ ] Add progress bars for operations > 1s
-- [ ] Async loading for large files
-
-### Medium-term (Significant impact)
-- [ ] Implement diff-based undo/redo
-- [ ] Use QThread for long operations
-- [ ] Lazy file loading with pagination
-
-### Long-term (Architectural changes)
-- [ ] Streaming data model for files > 10GB
-- [ ] Distributed computing support (Dask/Ray)
-- [ ] GPU acceleration for featurization (cuDF)
-
-## Monitoring
-
-Recommended metrics to track:
-- File load time vs. file size
-- Memory usage per operation type
-- UI freeze duration (target: 0)
-- Test with files: 100MB, 1GB, 10GB
-
-## Conclusion
-
-Parqcel is well-architected for typical use cases (files < 1GB). For very large datasets, implementing the recommendations above will significantly improve user experience. The most impactful changes are:
-1. Diff-based undo/redo (memory)
-2. Async operations with progress indicators (UX)
-3. Column statistics caching (responsiveness)
+Further optimization should follow measured bottlenecks: page-request coalescing, bounded statistics caches, chunk-aware import and explicit materialization policies can build on the current preview/session boundaries.

@@ -11,9 +11,7 @@ SIZE = 512
 
 
 def blend(color_a, color_b, ratio):
-    return tuple(
-        int(color_a[i] * (1 - ratio) + color_b[i] * ratio) for i in range(4)
-    )
+    return tuple(int(color_a[i] * (1 - ratio) + color_b[i] * ratio) for i in range(4))
 
 
 def gradient_fill(size, start_color, end_color, diagonal=False):
@@ -83,7 +81,11 @@ for row in range(5):
         end = (20, 74 + row * 8, 198 + row * 6, 255)
         paste_gradient(img, (x0, y0, x1, y1), 6, start, end, diagonal=True)
 
-for offset, color in [((0, 66), (15, 194, 226, 210)), ((0, 42), (16, 120, 245, 210)), ((0, 18), (18, 76, 235, 215))]:
+for offset, color in [
+    ((0, 66), (15, 194, 226, 210)),
+    ((0, 42), (16, 120, 245, 210)),
+    ((0, 18), (18, 76, 235, 215)),
+]:
     layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
     layer_draw = ImageDraw.Draw(layer)
     layer_draw.rounded_rectangle(
@@ -99,9 +101,13 @@ arch_draw = ImageDraw.Draw(arch_mask)
 arch_draw.rounded_rectangle((108, 72, 444, 318), radius=116, fill=255)
 arch_draw.rounded_rectangle((255, 126, 366, 240), radius=54, fill=0)
 arch_draw.rectangle((108, 182, 256, 318), fill=0)
-arch_gradient = gradient_fill(img.size, (90, 202, 255, 255), (108, 255, 210, 255), diagonal=True)
+arch_gradient = gradient_fill(
+    img.size, (90, 202, 255, 255), (108, 255, 210, 255), diagonal=True
+)
 arch_shadow = Image.new("RGBA", img.size, (0, 0, 0, 0))
-ImageDraw.Draw(arch_shadow).rounded_rectangle((116, 84, 452, 330), radius=116, fill=(0, 0, 0, 80))
+ImageDraw.Draw(arch_shadow).rounded_rectangle(
+    (116, 84, 452, 330), radius=116, fill=(0, 0, 0, 80)
+)
 arch_shadow = arch_shadow.filter(ImageFilter.GaussianBlur(14))
 img.alpha_composite(arch_shadow)
 img.paste(arch_gradient, (0, 0), arch_mask)
@@ -111,7 +117,19 @@ ribbon_layers = [
     (10, (20, 208, 228, 255)),
     (0, (24, 219, 195, 255)),
 ]
-ribbon_points = [(108, 390), (156, 352), (208, 326), (266, 302), (318, 274), (382, 236), (392, 246), (326, 290), (274, 330), (242, 380), (120, 390)]
+ribbon_points = [
+    (108, 390),
+    (156, 352),
+    (208, 326),
+    (266, 302),
+    (318, 274),
+    (382, 236),
+    (392, 246),
+    (326, 290),
+    (274, 330),
+    (242, 380),
+    (120, 390),
+]
 for offset_y, color in ribbon_layers:
     ribbon = Image.new("RGBA", img.size, (0, 0, 0, 0))
     ribbon_draw = ImageDraw.Draw(ribbon)

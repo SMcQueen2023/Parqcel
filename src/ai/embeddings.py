@@ -46,11 +46,14 @@ class Embedder:
             arr = self.model.encode(texts, show_progress_bar=False)
             return np.asarray(arr)
         # Fallback to TF-IDF dense vectors
+        tfidf = self._tfidf
+        if tfidf is None:
+            raise RuntimeError("No embedding backend is available")
         if not self._tfidf_fitted:
-            mat = self._tfidf.fit_transform(texts)
+            mat = tfidf.fit_transform(texts)
             self._tfidf_fitted = True
         else:
-            mat = self._tfidf.transform(texts)
+            mat = tfidf.transform(texts)
         return mat.toarray()
 
 
@@ -95,9 +98,9 @@ class EmbeddingStore:
         q_norms[q_norms == 0] = 1.0
         q = q / q_norms
         if self._faiss_index is not None:
-            D, I = self._faiss_index.search(q, top_k)
+            distances, indices = self._faiss_index.search(q, top_k)
             results = []
-            for score, idx in zip(D[0], I[0]):
+            for score, idx in zip(distances[0], indices[0]):
                 if idx < 0:
                     continue
                 results.append((self.ids[idx], float(score)))
@@ -115,6 +118,8 @@ class EmbeddingStore:
         return [(self.ids[i], float(sims[i])) for i in top_idx]
 
     def save(self, path: str):
+        if self.vectors is None:
+            raise ValueError("Cannot save an empty embedding store")
         np.savez(path, ids=np.array(self.ids), vectors=self.vectors)
 
     def load(self, path: str):

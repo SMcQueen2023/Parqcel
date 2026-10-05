@@ -3,667 +3,124 @@
 ![Parqcel logo](src/parqcel/assets/parqcel_icon.png)
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-A modern, fast, and feature-rich desktop application for viewing, editing, and analyzing **Parquet**, **CSV**, and **Excel** files. Built with PyQt6 and powered by Polars for lightning-fast data processing.
+Parqcel is a desktop Parquet viewer and editor built with PyQt6 and Polars. It supports CSV import, filtering, sorting, column statistics and typed cell editing. Optional packages add feature engineering, PCA/UMAP and an AI assistant.
 
-## 🎯 What is Parqcel?
+Use **File → Preview Parquet...** to inspect a file through read-only lazy pages. Use **File → Open File** to load a complete dataset for editing. Preview and editable pagination have different memory requirements; see [PERFORMANCE.md](PERFORMANCE.md).
 
-Parqcel is a professional-grade data exploration and manipulation tool designed for data engineers, analysts, and scientists who work with tabular data. It combines the speed of Polars with an intuitive GUI to provide a seamless experience for:
+## Desktop workflow
 
-- **Viewing** large datasets with efficient pagination (no memory overload)
-- **Editing** data inline with full undo/redo support
-- **Analyzing** with column statistics, filtering, and sorting
-- **Transforming** with feature engineering and dimensionality reduction
-- **Automating** with an optional AI assistant for Polars code generation
+1. Preview a Parquet file, or open it in the editor. CSV import offers **Strings (preserve text)** or **Infer numbers and other types**; strings are the default.
+2. Navigate pages and right-click a column header to sort, filter, convert its type or request statistics.
+3. Edit supported scalar cells, add columns or drop columns. Invalid edits leave the dataset and history unchanged. Complex column types remain read-only.
+4. Use Undo/Redo buttons or the platform's standard keyboard shortcuts. History is bounded; an operation may exceed the retained history budget.
+5. Choose **File → Save As...** to export Parquet. Saving writes a temporary sibling file and replaces the destination after successful output.
 
-Whether you're exploring a multi-gigabyte Parquet file, cleaning CSV data, or performing exploratory data analysis, Parqcel provides a powerful yet user-friendly interface.
+The title marks unsaved changes. Opening another file or closing the window offers Save, Discard and Cancel. Undoing back to the saved state clears the unsaved marker.
 
----
+Long operations run in the background. Results apply only while the originating dataset and revision are still current. A save writes the snapshot captured when it began; later edits remain unsaved. **Cancel** discards result delivery while active work finishes naturally; it does not roll back a file write already in progress. Closing waits for active work before releasing its resources.
 
-## ✨ Key Features
+Parquet is the primary supported format. Excel remains a legacy optional import path: its reader engine is not bundled or supported by the base installation.
 
-### 📁 File Operations
-- **Multi-format support**: Open Parquet, CSV, and Excel files
-- **Fast pagination**: Handle large datasets efficiently with configurable page sizes
-- **Save as Parquet**: Export your modified data to high-performance Parquet format
-- **Drag & drop**: Quick file loading via drag-and-drop interface
+## Installation
 
-### ✏️ Editing Capabilities
-- **Inline cell editing**: Click any cell to edit values directly
-- **Full undo/redo**: Navigate through edit history with Ctrl+Z/Ctrl+Y
-- **Add columns**: Create new calculated or static columns
-- **Type conversion**: Convert columns between string, integer, float, datetime, and boolean types
-- **Multi-sort**: Sort by multiple columns with custom ascending/descending order
+### Windows desktop
 
-### 📊 Data Analysis
-- **Column statistics**: Automatic computation of:
-  - Count, nulls, unique values
-  - Min, max, mean, median, std deviation
-  - Type-specific metrics (e.g., string lengths, date ranges)
-- **Quick filters**: Right-click column headers for instant filtering:
-  - Equals, not equals, contains (strings)
-  - Greater than, less than, between (numbers)
-  - Date range filters (datetime)
-  - Is null / is not null
-- **Advanced filtering**: Chain multiple filters for complex queries
+Use the standalone Windows installer provided with a release. It includes Python and creates normal application shortcuts. The **base** build contains the editor and preview; the **ml** build also includes feature engineering and dimensionality reduction. Hosted/local AI stacks are excluded from both desktop build profiles.
 
-### 🧪 Data Science Features (ML Extras)
-- **Automated featurization**:
-  - Numeric features: scaling, normalization
-  - Categorical features: one-hot encoding, label encoding
-  - Text features: TF-IDF vectorization, character n-grams
-- **Dimensionality reduction**:
-  - PCA (Principal Component Analysis)
-  - UMAP (Uniform Manifold Approximation and Projection)
-  - Interactive Plotly visualizations
-  - Export embeddings to CSV or HTML
+### Python and source
 
-### 🤖 AI Assistant (AI Extras)
-- **Natural language queries**: Ask for data transformations in plain English
-- **Polars code suggestions**: Receive a proposed Polars expression that you review before applying
-- **Safe execution**: AST-based code validation ensures only safe operations
-- **Multiple backends**:
-  - OpenAI (GPT models)
-  - HuggingFace (local or hosted transformers)
-  - Dummy mode (offline testing)
-- **Prompt-based**: Operates on your natural-language request; dataframe schema is not automatically included in prompts
-- **Current scope**: Best suited to single-step dataframe transformations rather than autonomous multi-step analysis
-
-### 🔒 Security & Safety
-- **Secure code execution**: AI-generated code validated before running
-- **Credential management**: API keys stored in OS keyring (not plaintext)
-- **Privacy considerations**: Your prompts are sent to the configured AI provider; the app does not automatically add table data or perform redaction, so avoid including sensitive data in prompts and review your provider's data policies
-- **Comprehensive validation**: See [SECURITY.md](SECURITY.md) for details
-
----
-
-## 📋 System Requirements
-
-- **Operating System**: Windows, macOS, or Linux
-- **Memory**: 4GB minimum, 8GB+ recommended for large files
-- **Display**: 1280x720 minimum resolution
-
-For Windows installer users, Python is not required on the target machine.
-Python 3.11+ is only required for source, `pip`, and packaging workflows.
-
----
-
-## 🚀 Installation
-
-### For Most Windows Users
-
-The primary distribution path for Parqcel is the standalone Windows installer.
-
-1. Download `Parqcel-Installer.exe` from the latest Windows release.
-2. Double-click the installer.
-3. Keep the default install location unless you have a specific reason to change it.
-4. Optionally enable the Desktop shortcut checkbox.
-5. Finish setup and launch Parqcel from the Start Menu or Desktop shortcut.
-
-What this gives you:
-
-- No Python installation required
-- No terminal usage during setup
-- Normal Windows app shortcuts and uninstall entry
-
-### Windows Desktop Installer for Releases
-
-The Windows installer is built from a standalone desktop bundle instead of running `pip install` on the target machine.
-
-- No Python installation is required on the end-user device.
-- No terminal is required during installation.
-- Start Menu and optional Desktop shortcuts are created by the installer.
-- The packaged feature set is determined by the desktop build profile.
-- Release-ready artifacts can be preserved under `dist\release` for upload to GitHub Releases.
-
-Recommended release shape:
-
-- Build the desktop installer with the `base` profile for mainstream non-technical users.
-- Keep `pip install` for technical users and advanced AI workflows.
-- Use the `ml` profile only when you want featurization and dimensionality reduction included in the desktop app.
-
-#### Build the standalone Windows installer
-
-```powershell
-py -3 -m pip install .[desktop-build]
-pwsh -File .\scripts\build_windows_desktop.ps1 -Clean -Installer
-```
-
-If you want ML features in the desktop app, install them into the build environment before running the packaging script:
-
-```powershell
-py -3 -m pip install .[ml,desktop-build]
-pwsh -File .\scripts\build_windows_desktop.ps1 -Clean -Profile ml -Installer
-```
-
-The packaging script produces a standalone app in `dist\Parqcel` and, when Inno Setup is available, an installer in `installer\dist\Parqcel-Installer.exe`. The default `base` profile explicitly excludes ML and AI stacks so the desktop build stays small and predictable even when your local Python environment has extra packages installed.
-
-For release uploads, keep profile-specific outputs such as `dist\release\Parqcel-base`, `dist\release\Parqcel-Installer-base.exe`, `dist\release\Parqcel-ml`, and `dist\release\Parqcel-Installer-ml.exe`.
-
-### For Technical Users (Python / Source)
+Python 3.11 or newer is required. From a checkout:
 
 ```bash
-# Clone the repository
-git clone https://github.com/SMcQueen2023/Parqcel.git
-cd Parqcel
-
-# Install base package
-pip install .
-
-# Run the application
+python -m pip install .
 parqcel
-```
-
-### Python Installation Options
-
-Use the Python installation path if you want source-based development, scripting, automation, or access to the heavier optional dependency stacks.
-
-Parqcel offers modular Python installation based on your needs:
-
-| Need | Command |
-|------|---------|
-| Core desktop app only | `pip install .` |
-| Core app + ML tooling | `pip install .[ml]` |
-| Core app + hosted AI backends | `pip install .[ai-openai]` |
-| Core app + local AI backends | `pip install .[ai-local]` |
-| Core app + ML + hosted AI | `pip install .[ml,ai-openai]` |
-| Core app + ML + local AI | `pip install .[ml,ai-local]` |
-| Everything | `pip install .[ai]` |
-
-#### 1. **Base Installation** (GUI only)
-```bash
-pip install .
-```
-Includes: PyQt6, Polars, basic viewing/editing features
-
-#### 2. **Data Science Package** (with ML features)
-```bash
-pip install .[ml]
-```
-Adds: numpy, scikit-learn, plotly, umap-learn  
-Enables: Featurization, PCA/UMAP, dimensionality reduction
-
-#### 3. **OpenAI Support Add-on**
-```bash
-pip install .[ai-openai]
-```
-Adds: OpenAI API client, keyring  
-Enables: Hosted AI backends without downloading local transformer models
-
-Recommended when you want the assistant backed by OpenAI but do not want the local transformer stack. Combine with `.[ml]` if you also want featurization and dimensionality reduction.
-
-#### 4. **Local AI Add-on**
-```bash
-pip install .[ai-local]
-```
-Adds: sentence-transformers, faiss-cpu, langchain, transformers  
-Enables: Local embedding and Hugging Face based AI workflows
-
-Recommended when you want local or Hugging Face driven AI features without pulling in the hosted OpenAI client.
-
-#### 5. **AI Assistant Package** (full features)
-```bash
-pip install .[ai]
-```
-Adds: All ML dependencies + hosted and local AI backends  
-Enables: AI-powered code generation, embeddings, NLP features
-
-#### 6. **Development Package**
-```bash
-pip install .[dev]
-```
-Adds: pytest, pytest-qt, black, ruff, mypy  
-Enables: Running tests, linting, type checking
-
-#### 7. **Desktop Packaging Tools**
-```bash
-pip install .[desktop-build]
-```
-Adds: PyInstaller  
-Enables: Building a standalone Windows desktop app and installer
-### Installing from PyPI (Technical Users)
-```bash
-pip install parqcel          # Base
-pip install parqcel[ml]      # With ML
-pip install parqcel[ai-openai]  # OpenAI integration only
-pip install parqcel[ai-local]   # Local AI integration only
-pip install parqcel[ai]      # With AI
-pip install parqcel[dev]     # Dev tools
-```
-
----
-
-## 🎮 Usage
-
-### Launching the GUI
-
-```bash
-# Method 1: Direct command
-parqcel
-
-# Method 2: Python module
+# Equivalent module entry point:
 python -m parqcel
-
-# Method 3: From source
-cd /path/to/Parqcel
-python src/main.py
 ```
 
-### Command-Line Interface (CLI)
+Choose additional packages as needed:
 
-Parqcel includes a headless CLI for automation and scripting:
+| Profile | Command |
+| --- | --- |
+| Core desktop | `python -m pip install .` |
+| Feature engineering, PCA/UMAP and plots | `python -m pip install ".[ml]"` |
+| OpenAI backend and keyring | `python -m pip install ".[ai-openai]"` |
+| Local Hugging Face tooling | `python -m pip install ".[ai-local]"` |
+| Combined optional AI/ML packages | `python -m pip install ".[ai]"` |
+| Development tools and base tests | `python -m pip install -e ".[dev]"` |
 
-#### Featurize a Dataset
+Optional actions are unavailable when their dependencies are missing. Installing the ML profile does not require configuring an AI provider.
+
+### Build a Windows package
+
+```powershell
+python -m pip install -c constraints/ci.txt ".[desktop-build]"
+pwsh -File .\scripts\build_windows_desktop.ps1 -Clean -Profile base -Installer
+```
+
+For an ML build, install `".[ml,desktop-build]"` and use `-Profile ml`. Installer creation requires Inno Setup. Outputs are `dist\Parqcel` and `installer\dist\Parqcel-Installer.exe`; preserve separate output copies when producing multiple profiles.
+
+## Command-line workflows
+
+The CLI shares dataset I/O and transformation services with the desktop. Featurization and PCA require the ML profile.
+
 ```bash
 parqcel-cli featurize input.parquet -o features.parquet
-```
-Generates numeric feature matrix from mixed-type data.
-
-#### Compute PCA Embeddings
-```bash
-parqcel-cli pca input.csv --components 3 -o embeddings.csv
-```
-Reduces dimensionality and saves principal components.
-
-#### Query the AI Assistant
-```bash
-parqcel-cli assistant "Filter rows where age > 30 and sort by name"
-```
-Get Polars code suggestions without launching the GUI.
-
----
-
-## 🔧 Configuration
-
-### AI Assistant Setup (Optional)
-
-To enable AI features, configure your preferred backend:
-
-#### Option 1: GUI Settings Dialog
-1. Launch Parqcel
-2. Go to **Settings → AI Settings**
-3. Select provider (OpenAI or HuggingFace)
-4. Enter API key (stored securely in OS keyring)
-5. Test connection
-
-#### Option 2: Environment Variables
-```bash
-# Set provider
-export PARQCEL_AI_PROVIDER=openai
-
-# OpenAI configuration
-export PARQCEL_OPENAI_API_KEY=sk-...
-export PARQCEL_OPENAI_API_BASE=https://api.openai.com/v1  # optional: for proxies or custom endpoints
-
-# HuggingFace configuration
-export PARQCEL_HF_MODEL=gpt2  # or any HF model name
+parqcel-cli pca input.csv --csv-types infer --components 3 -o embeddings.csv
+parqcel-cli assistant "top 5 by revenue"
 ```
 
-#### Option 3: Config File
-Config stored at: `~/.parqcel/config.json` (auto-created by GUI)
+CSV defaults to strings in both desktop and CLI; specify `--csv-types infer` when inferred numeric columns are wanted. Featurization writes Parquet and PCA writes CSV. The assistant command prints a suggestion; it does not apply it to a dataset.
+
+## AI assistant
+
+The default `dummy` provider works offline and recognizes a small set of prompts. Optional `openai` and `hf` providers use their installed backends; the Hugging Face backend runs a local transformers pipeline and may download model weights.
+
+Suggestions are declarative transformation plans. Review the suggestion before applying it. Supported dataframe operations are select, filter, sort, drop, with-columns, head, tail and rename. A restricted Polars-expression compatibility parser translates supported older suggestions into the same plan. Generated Python is never compiled or executed.
+
+The assistant sends your prompt to the selected backend. Dataset contents and schema are not automatically added, and prompts are not automatically redacted. Resource-intensive valid operations can still consume substantial memory or CPU. See [SECURITY.md](SECURITY.md) for boundaries and credential handling.
+
+Configure the provider through **Settings → AI Settings**, environment variables, or a JSON file:
 
 ```json
 {
-  "provider": "openai",
-  "openai_api_base": "https://api.openai.com/v1",
+  "provider": "dummy",
   "hf_model": "gpt2"
 }
 ```
 
-**Note**: API keys are **never** written to config files. They're stored in your system's secure keyring.
+The default file is `~/.parqcel/config.json`. `PARQCEL_CONFIG_FILE` selects a different file. Nonempty `PARQCEL_AI_PROVIDER`, `PARQCEL_OPENAI_API_KEY`, `PARQCEL_OPENAI_API_BASE` and `PARQCEL_HF_MODEL` override file values. GUI saves exclude API keys; keyring is the optional persistence mechanism.
 
-#### Available Backends
-- **`openai`**: OpenAI GPT models (requires API key)
-- **`hf`**: HuggingFace transformers (local or cloud)
-- **`dummy`**: Offline mode for testing (returns placeholder code)
-
----
-
-## 📖 User Guide
-
-### Basic Workflow
-
-1. **Open a file**: File → Open, or drag & drop
-2. **Explore data**: Navigate pages, view statistics
-3. **Filter/Sort**: Right-click column headers for quick operations
-4. **Edit cells**: Double-click to edit, Ctrl+Z to undo
-5. **Transform**: Use AI assistant or manual operations
-6. **Export**: File → Save As Parquet
-
-### Tips for Large Files
-
-- Use **pagination** to avoid loading entire file into memory
-- Apply **filters early** to reduce working set size
-- **Save intermediate results** to Parquet for faster reloading
-- See [PERFORMANCE.md](PERFORMANCE.md) for optimization strategies
-
-### AI Assistant Best Practices
-
-- **Be specific**: "Filter rows where price > 100" works better than "filter by price"
-- **Review code**: Always check generated code before executing
-- **Test on samples**: Try transformations on filtered subsets first
-- **Iterative refinement**: If code doesn't work, rephrase your query
-
-### Current AI Limits
-
-- The assistant suggests one transformation at a time; it is not an autonomous analysis agent
-- Dummy mode is mainly for offline testing and only handles simple prompt patterns reliably
-- Real LLM backends return text plus a proposed code snippet; malformed responses are rejected rather than auto-applied
-- The validator reduces risk but does not provide full sandboxing or resource isolation
-
----
-
-## 🧪 Testing
-
-### Running Tests
+## Development and checks
 
 ```bash
-# Install dev dependencies
-pip install .[dev]
-
-# Run all tests
-pytest -q
-
-# Run with verbose output
-pytest -v
-
-# Run specific test file
-pytest tests/test_validator.py
-
-# Run with coverage
-pytest --cov=src tests/
+python -m pip install -e ".[dev]"
+python -m pytest -q
+python -m ruff check src tests scripts
+python -m black --check src tests scripts
+python -m mypy src
 ```
 
-### Test Structure
-
-```
-tests/
-├── test_validator.py      # AI code validation
-├── test_featurize.py      # Feature engineering
-├── test_parsers.py        # Data type conversion
-├── test_filtering.py      # Filtering logic
-└── test_stats.py          # Statistics computation
-```
-
----
-
-## 🛠️ Development
-
-### Setting Up Development Environment
+ML-specific tests skip when their optional packages are absent. Install `".[dev,ml]"` in a separate environment to exercise that profile. Qt tests run offscreen and include real background-task lifecycle tests.
 
 ```bash
-# Clone repo
-git clone https://github.com/SMcQueen2023/Parqcel.git
-cd Parqcel
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install with all dev dependencies
-pip install -e .[dev]
-
-# Install pre-commit hooks (optional)
-pip install pre-commit
-pre-commit install
+python scripts/benchmark_desktop.py --rows 100000
+python scripts/benchmark_desktop.py --input data.parquet
 ```
 
-### Code Quality
+The benchmark emits JSON timing and native process peak-memory measurements. It does not measure rendered UI latency or establish a universal memory limit.
 
-#### Formatting
-```bash
-black src/ tests/          # Auto-format code
-ruff check src/ tests/     # Lint and check style
-```
+The repository CI configuration covers Windows/Linux base tests on Python 3.11, ML tests on 3.13, installed-wheel smoke checks, lint/format/type checks, and Windows base desktop/installer smoke checks. Check the workflow run for results; configuration alone does not establish that a release passed.
 
-#### Type Checking
-```bash
-mypy src/                  # Static type analysis
-```
+[constraints/ci.txt](constraints/ci.txt) pins tested runtime, ML, QA and build-tool versions for CI. Each test job preserves its resolved dependency list as an artifact.
 
-#### Security Scanning
-```bash
-bandit -r src/             # Security vulnerability scan
-ruff check src/ --select S # Security-focused linting
-```
+- [CONTRIBUTING.md](CONTRIBUTING.md): development boundaries and validation
+- [PERFORMANCE.md](PERFORMANCE.md): memory behavior and benchmark interpretation
+- [SECURITY.md](SECURITY.md): transformation and data boundaries
+- [CHANGELOG.md](CHANGELOG.md): release history
 
-### Project Structure
+## License and author
 
-```
-Parqcel/
-├── src/
-│   ├── parqcel/          # Main package
-│   │   ├── __main__.py   # Entry point
-│   │   └── assets/       # Icons and resources
-│   ├── app/              # GUI components
-│   │   ├── main_window.py
-│   │   └── widgets/      # UI dialogs and panels
-│   ├── models/           # Data models (Polars integration)
-│   ├── logic/            # Business logic
-│   │   ├── stats.py      # Statistics computation
-│   │   ├── filters.py    # Filtering operations
-│   │   └── parsers.py    # Type conversion
-│   ├── ds/               # Data science features
-│   │   ├── featurize.py  # Feature engineering
-│   │   └── dimensionality.py  # PCA/UMAP
-│   ├── ai/               # AI assistant
-│   │   ├── assistant.py  # Main assistant logic
-│   │   ├── backends.py   # Provider implementations
-│   │   ├── validator.py  # Code safety validation
-│   │   └── config.py     # Configuration management
-│   ├── cli.py            # CLI entry point
-│   └── main.py           # GUI entry point
-├── tests/                # Test suite
-├── docs/                 # Documentation
-├── pyproject.toml        # Project metadata & dependencies
-├── README.md             # This file
-├── CHANGELOG.md          # Version history
-├── SECURITY.md           # Security documentation
-├── PERFORMANCE.md        # Performance guide
-└── CONTRIBUTING.md       # Contribution guidelines
-```
-
----
-
-## 🔒 Security
-
-Parqcel takes security seriously, especially for the AI assistant feature which executes code.
-
-### Key Security Features
-
-- **AST-based code validation**: Only safe Polars operations allowed
-- **No arbitrary imports**: Import statements are blocked
-- **No system access**: File I/O and network operations prohibited
-- **Sandboxed execution**: Only `df` and `pl` variables accessible
-- **Credential protection**: API keys stored in OS keyring, never in logs
-
-### Security Best Practices
-
-⚠️ **Do NOT use AI features on sensitive data**:
-- Personal Identifiable Information (PII)
-- Financial records
-- Healthcare data (PHI)
-- Trade secrets or confidential data
-
-✅ **Safe usage**:
-- Review all AI-generated code before execution
-- Test on sample/synthetic data first
-- Use read-only API keys when possible
-- Rotate API keys periodically
-
-For detailed security information, see [SECURITY.md](SECURITY.md).
-
----
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-#### Installation Problems
-
-**Issue**: `pip install` fails with compilation errors  
-**Solution**: Ensure you have Python 3.11+ and update pip: `pip install --upgrade pip`
-
-**Issue**: PyQt6 installation fails  
-**Solution**: Some systems require system packages:
-```bash
-# Ubuntu/Debian
-sudo apt-get install python3-pyqt6
-
-# macOS
-brew install pyqt6
-```
-
-#### Runtime Issues
-
-**Issue**: Application won't launch  
-**Solution**: Check Python version: `python --version` (must be 3.11+)
-
-**Issue**: Large file crashes the app  
-**Solution**: 
-- Increase pagination size: adjust page size in settings
-- Filter data before loading
-- See [PERFORMANCE.md](PERFORMANCE.md) for optimization tips
-
-**Issue**: AI assistant not working  
-**Solution**:
-1. Verify API key is set (Settings → AI Settings)
-2. Check internet connection
-3. Test with dummy backend first: `export PARQCEL_AI_PROVIDER=dummy`
-
-#### Data Issues
-
-**Issue**: Date columns not parsing correctly  
-**Solution**: The parser tries multiple formats. If it fails:
-- Ensure dates are in ISO 8601 format (YYYY-MM-DD)
-- Or use type conversion dialog to specify custom format
-
-**Issue**: Excel file not loading  
-**Solution**: Ensure you have openpyxl installed: `pip install openpyxl`
-
-### Getting Help
-
-- **GitHub Issues**: [Report bugs or request features](https://github.com/SMcQueen2023/Parqcel/issues)
-- **Discussions**: [Ask questions or share ideas](https://github.com/SMcQueen2023/Parqcel/discussions)
-- **Security**: See [SECURITY.md](SECURITY.md) for vulnerability reporting
-
----
-
-## 📊 Performance
-
-Parqcel is optimized for real-world datasets, but performance depends on file size and operations:
-
-| File Size | Memory Usage | Load Time | Notes |
-|-----------|--------------|-----------|-------|
-| < 100 MB  | ~2x file size | < 1s | Excellent performance |
-| 100 MB - 1 GB | ~3x file size | 1-5s | Good, use pagination |
-| 1 - 10 GB   | ~3-5x file size | 5-30s | Recommended: filter early |
-| > 10 GB   | Variable | 30s+ | May require optimization |
-
-**Performance Tips**:
-- Use Parquet format (10-100x faster than CSV)
-- Apply filters before expensive operations
-- Limit undo history for large files
-- Use CLI for batch processing
-
-For detailed performance analysis and optimization strategies, see [PERFORMANCE.md](PERFORMANCE.md).
-
----
-
-## 🗺️ Roadmap
-
-### Current Version (0.1.1)
-- ✅ Parquet/CSV/Excel support
-- ✅ Inline editing with undo/redo
-- ✅ Column statistics and filtering
-- ✅ Featurization and PCA/UMAP
-- ✅ AI assistant with safe execution
-
-### Planned Features
-- [ ] **Multi-tab interface**: Work with multiple files simultaneously
-- [ ] **SQL query support**: Write SQL against loaded dataframes
-- [ ] **Plot builder**: Create custom visualizations
-- [ ] **Macro system**: Record and replay operation sequences
-- [ ] **Plugin architecture**: Extend with custom transformations
-- [ ] **Collaborative features**: Share configs and transformations
-- [ ] **Cloud integration**: Direct S3/Azure/GCS file access
-- [ ] **Real-time streaming**: Monitor and analyze live data feeds
-
-### Under Consideration
-- Database connectivity (PostgreSQL, MySQL, SQLite)
-- Jupyter notebook export
-- Automated data profiling and quality reports
-- Integration with dbt, Airflow, and other data tools
-
-See [CHANGELOG.md](CHANGELOG.md) for version history.
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome! Whether you're fixing bugs, adding features, or improving documentation, your help makes Parqcel better.
-
-### How to Contribute
-
-1. **Fork** the repository
-2. **Create** a feature branch: `git checkout -b feature/amazing-feature`
-3. **Make** your changes
-4. **Test** thoroughly: `pytest -v`
-5. **Format** code: `black .` and `ruff check .`
-6. **Commit**: `git commit -m "Add amazing feature"`
-7. **Push**: `git push origin feature/amazing-feature`
-8. **Open** a Pull Request
-
-### Contribution Guidelines
-
-- Follow existing code style (Black formatting, Ruff linting)
-- Add tests for new features
-- Update documentation as needed
-- Keep PRs focused and atomic
-- For major changes, open an issue first to discuss
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
-
----
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
-
-## 👨‍💻 Author
-
-**Scott McQueen** — Data Engineer
-
-- GitHub: [@SMcQueen2023](https://github.com/SMcQueen2023)
-- Project: [Parqcel](https://github.com/SMcQueen2023/Parqcel)
-
----
-
-## 🙏 Acknowledgments
-
-Built with these excellent open-source projects:
-
-- **[Polars](https://pola.rs/)**: Lightning-fast DataFrame library
-- **[PyQt6](https://www.riverbankcomputing.com/software/pyqt/)**: Cross-platform GUI framework
-- **[scikit-learn](https://scikit-learn.org/)**: Machine learning and featurization
-- **[Plotly](https://plotly.com/)**: Interactive visualizations
-- **[UMAP](https://umap-learn.readthedocs.io/)**: Dimensionality reduction
-- **[OpenAI](https://openai.com/)**: AI assistant backend
-- **[HuggingFace](https://huggingface.co/)**: Transformers and model hosting
-
----
-
-## 📚 Additional Resources
-
-- **[SECURITY.md](SECURITY.md)**: Comprehensive security documentation
-- **[PERFORMANCE.md](PERFORMANCE.md)**: Performance optimization guide
-- **[CONTRIBUTING.md](CONTRIBUTING.md)**: Contribution guidelines
-- **[CHANGELOG.md](CHANGELOG.md)**: Version history and release notes
-
----
-
-**Made with ❤️ for the data community**
+[MIT](LICENSE). Created by [Scott McQueen](https://github.com/SMcQueen2023).

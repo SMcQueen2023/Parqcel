@@ -2,6 +2,7 @@
 
 Provides PCA (via scikit-learn) and optional UMAP integration (if installed).
 """
+
 from typing import Tuple, Optional
 import numpy as np
 

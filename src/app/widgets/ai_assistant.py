@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import pyqtSignal
 from typing import Optional
 
-from app.background_tasks import run_in_background
+from app.background_tasks import cancel_tasks, run_in_background
 
 
 class AIAssistantWidget(QWidget):
@@ -99,14 +99,21 @@ class AIAssistantWidget(QWidget):
             self.send_btn.setEnabled(True)
             self.input.setEnabled(True)
 
+        assistant = self.assistant
         run_in_background(
             self,
-            lambda: self.assistant.suggest_transformation(prompt),
+            lambda: assistant.suggest_transformation(prompt),
             _success,
             _error,
             _finished,
         )
         self.input.clear()
+
+    def closeEvent(self, event) -> None:
+        cancel_tasks(self)
+        self.send_btn.setEnabled(True)
+        self.input.setEnabled(True)
+        super().closeEvent(event)
 
     def _on_apply(self) -> None:
         if not self._last_code:

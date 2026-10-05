@@ -1,6 +1,2 @@
-# Compatibility export for the Parqcel ML install profile.
--r requirements.txt
-numpy
-scikit-learn
-plotly
-umap-learn
+# Compatibility entry point for the Parqcel ML profile.
+.[ml]
