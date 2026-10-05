@@ -79,7 +79,7 @@ jobs:
       - run: python -m pip install '.[desktop-build]'
       - name: Build desktop and installer
         shell: pwsh
-        run: ./scripts/build_windows_desktop.ps1 -Profile base -Installer
+        run: ./scripts/build_windows_desktop.ps1 -Profile base -Installer -PythonExecutable (Join-Path $env:pythonLocation 'python.exe')
       - name: Smoke test standalone desktop
         shell: pwsh
         run: |

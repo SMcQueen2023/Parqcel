@@ -35,12 +35,14 @@ function Get-PythonCommand {
         return @($localVenvPython)
     }
 
-    if (Get-Command py -ErrorAction SilentlyContinue) {
-        return @("py", "-3")
-    }
-
+    # Prefer the active PATH environment (including actions/setup-python) over
+    # the launcher, which may select another installed Python version.
     if (Get-Command python -ErrorAction SilentlyContinue) {
         return @("python")
+    }
+
+    if (Get-Command py -ErrorAction SilentlyContinue) {
+        return @("py", "-3")
     }
 
     throw "Python 3 was not found on PATH. Install Python before building the desktop bundle."
