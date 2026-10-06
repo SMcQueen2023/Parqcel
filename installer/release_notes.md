@@ -1,8 +1,15 @@
-Parqcel 0.1.1 — Windows release packaging, async UX improvements, and reliability fixes
+Parqcel 0.2.0 — Spreadsheet workspace and Parquet analysis tools
 
-This release refreshes the Windows desktop release flow and packages the latest reliability, safety, and UX improvements.
+This release adds a shared light/dark desktop workspace for editable datasets and read-only lazy Parquet previews.
 
 Highlights:
+
+- System, Light and Dark themes, a compact action toolbar, recent files and drag-and-drop preview.
+- Clipboard copy with headers, column visibility/reordering/renaming, and view-only display formatting.
+- Selection summaries, Find/Go To and a scoped column inspector with background profiling.
+- Separate Save and Save As actions plus atomic CSV export; export does not clear unsaved Parquet edits.
+- Selection-preserving cell edits and consistent one-based row labels.
+- The About dialog, Python package and Windows installer identify this build as version 0.2.0.
 
 - Windows packaging: refreshed standalone bundle and installer outputs for both the `base` and `ml` desktop profiles.
 - Responsiveness: featurization, dimensionality reduction, AI assistant requests, and AI backend connection tests now run off the UI thread.

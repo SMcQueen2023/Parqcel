@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import polars as pl
-from PyQt6.QtCore import QAbstractTableModel, QModelIndex, Qt
+from PyQt6.QtCore import Qt, pyqtSlot
 from PyQt6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -13,98 +13,111 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
-    QTableView,
+    QToolBar,
     QVBoxLayout,
 )
 
-from app.background_tasks import cancel_tasks, run_in_background
+from app.background_tasks import TaskHandle, cancel_tasks, run_in_background
+from app.icons import line_icon
+from app.widgets.data_grid import DataGrid
+from models.preview_table_model import PreviewTableModel
 from parqcel.core.parquet_source import ParquetSource
-
-
-class PreviewTableModel(QAbstractTableModel):
-    """Present a single page without an editable dataset or history buffer."""
-
-    def __init__(self, parent=None) -> None:
-        super().__init__(parent)
-        self.frame = pl.DataFrame()
-        self.row_offset = 0
-
-    def replace_page(self, frame: pl.DataFrame, row_offset: int) -> None:
-        self.beginResetModel()
-        self.frame = frame
-        self.row_offset = row_offset
-        self.endResetModel()
-
-    def rowCount(self, parent=QModelIndex()) -> int:
-        return 0 if parent.isValid() else self.frame.height
-
-    def columnCount(self, parent=QModelIndex()) -> int:
-        return 0 if parent.isValid() else self.frame.width
-
-    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
-        if (
-            role != Qt.ItemDataRole.DisplayRole
-            or not index.isValid()
-            or index.row() >= self.frame.height
-            or index.column() >= self.frame.width
-        ):
-            return None
-        value = self.frame[index.row(), index.column()]
-        return "" if value is None else str(value)
-
-    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
-        if role != Qt.ItemDataRole.DisplayRole or section < 0:
-            return None
-        if orientation == Qt.Orientation.Horizontal:
-            if section >= self.frame.width:
-                return None
-            return f"{self.frame.columns[section]}\n({self.frame.dtypes[section]})"
-        return str(self.row_offset + section + 1)
-
-    def flags(self, index):
-        if not index.isValid():
-            return Qt.ItemFlag.NoItemFlags
-        return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
 
 
 class PreviewWindow(QDialog):
     def __init__(self, path: str | Path, parent=None, *, page_size: int = 1000) -> None:
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        self.setWindowTitle(f"Parquet Preview — {Path(path).name}")
-        self.resize(900, 600)
+        self.setWindowTitle(f"{Path(path).name} — Parqcel Preview")
+        self.resize(1080, 700)
+        self.setMinimumSize(640, 420)
+        self.path = Path(path)
         self.source: ParquetSource | None = None
         self.page_index = 0
         self._requested_page = 0
         self._generation = 0
         self._closing = False
+        # Cancellation suppresses delivery but cannot stop a Parquet decode.
+        # Keep at most one decode running and replace the queued destination.
+        self._page_fetch_active = True
+        self._page_task: TaskHandle | None = None
+        self._pending_page: tuple[int, int] | None = None
 
         layout = QVBoxLayout(self)
-        layout.addWidget(
-            QLabel("Read-only preview. Open the file in the editor to make changes.")
+        layout.setContentsMargins(16, 14, 16, 12)
+        layout.setSpacing(10)
+        heading = QHBoxLayout()
+        self.title_label = QLabel(self.path.name)
+        self.title_label.setObjectName("workspaceTitle")
+        self.title_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.title_label.setWordWrap(True)
+        self.title_label.setToolTip(str(self.path))
+        self.mode_badge = QLabel("Read-only preview")
+        self.mode_badge.setObjectName("modeBadge")
+        heading.addWidget(self.title_label, 1)
+        heading.addWidget(self.mode_badge)
+        layout.addLayout(heading)
+        self.subtitle_label = QLabel(
+            "Search, selection summaries, and column profiles use the current preview page."
         )
-        self.table_view = QTableView(self)
+        self.subtitle_label.setObjectName("workspaceSubtitle")
+        self.subtitle_label.setWordWrap(True)
+        layout.addWidget(self.subtitle_label)
+
+        self.grid = DataGrid(self)
+        self.table_view = self.grid.table_view
+        self.table_view.verticalHeader().setDefaultSectionSize(27)
         self.model = PreviewTableModel(self)
-        self.table_view.setModel(self.model)
-        layout.addWidget(self.table_view)
+        self.grid.set_model(
+            self.model,
+            identity=str(self.path.resolve()),
+            scope_label="Current preview page",
+        )
+        self.toolbar = QToolBar("Preview actions", self)
+        self.toolbar.setMovable(False)
+        self.toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        for action, name in (
+            (self.grid.copy_action, "copy"),
+            (self.grid.copy_headers_action, "copy"),
+            (self.grid.find_action, "find"),
+            (self.grid.columns_action, "columns"),
+            (self.grid.inspector_action, "inspector"),
+        ):
+            action.setIcon(line_icon(name))
+        self.toolbar.addAction(self.grid.copy_action)
+        self.toolbar.addAction(self.grid.copy_headers_action)
+        self.toolbar.addSeparator()
+        self.toolbar.addAction(self.grid.find_action)
+        self.toolbar.addAction(self.grid.go_to_action)
+        self.toolbar.addSeparator()
+        self.toolbar.addAction(self.grid.columns_action)
+        self.toolbar.addAction(self.grid.format_action)
+        self.toolbar.addAction(self.grid.inspector_action)
+        layout.addWidget(self.toolbar)
+        layout.addWidget(self.grid, 1)
         self.status_label = QLabel("Opening Parquet preview…")
+        self.status_label.setObjectName("secondaryText")
+        self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
         buttons = QHBoxLayout()
+        buttons.setSpacing(7)
         self.previous_button = QPushButton("Previous")
         self.next_button = QPushButton("Next")
+        self.previous_button.setIcon(line_icon("previous"))
+        self.next_button.setIcon(line_icon("next"))
+        self.page_label = QLabel("Page —")
+        self.page_label.setObjectName("secondaryText")
         self.page_input = QLineEdit()
         self.page_input.setPlaceholderText("Page number")
-        self.page_input.setMaximumWidth(120)
+        self.page_input.setAccessibleName("Preview page number")
+        self.page_input.setMaximumWidth(100)
         self.jump_button = QPushButton("Go")
         self.close_button = QPushButton("Close")
-        for widget in (
-            self.previous_button,
-            self.next_button,
-            self.page_input,
-            self.jump_button,
-            self.close_button,
-        ):
+        for widget in (self.previous_button, self.next_button, self.page_label):
             buttons.addWidget(widget)
+        buttons.addStretch(1)
+        for control in (self.page_input, self.jump_button, self.close_button):
+            buttons.addWidget(control)
         layout.addLayout(buttons)
         self.previous_button.clicked.connect(
             lambda: self.load_page(self._requested_page - 1)
@@ -130,9 +143,13 @@ class PreviewWindow(QDialog):
             self.source, frame = result
             self._display_page(0, frame)
 
-        run_in_background(
-            self, open_source, opened, lambda exc: self._error(exc, generation)
+        self._page_task = run_in_background(
+            self,
+            open_source,
+            opened,
+            lambda exc: self._error(exc, generation),
         )
+        self._page_task.finished.connect(self._page_fetch_finished)
 
     def _update_controls(self) -> None:
         pages = self.source.page_count if self.source is not None else 0
@@ -142,6 +159,7 @@ class PreviewWindow(QDialog):
         )
         self.page_input.setEnabled(not self._closing and pages > 0)
         self.jump_button.setEnabled(not self._closing and pages > 0)
+        self.toolbar.setEnabled(not self._closing and self.source is not None)
 
     def _display_page(self, page_index: int, frame: pl.DataFrame) -> None:
         assert self.source is not None
@@ -151,8 +169,13 @@ class PreviewWindow(QDialog):
             page_text = f"Page {page_index + 1:,} of {self.source.page_count:,}"
         else:
             page_text = "Empty dataset"
+        self.page_label.setText(page_text)
+        self.page_input.setText(str(page_index + 1) if self.source.page_count else "")
         self.status_label.setText(
-            f"{page_text} · {self.source.row_count:,} rows · {len(self.source.schema):,} columns"
+            f"{self.source.row_count:,} rows · {len(self.source.schema):,} columns"
+            f" · {frame.height:,} rows on this page"
+            if self.source.page_count
+            else f"Empty dataset · {len(self.source.schema):,} columns"
         )
         self._update_controls()
 
@@ -165,17 +188,45 @@ class PreviewWindow(QDialog):
         self._requested_page = page_index
         self.status_label.setText(f"Loading page {page_index + 1:,}…")
         self._update_controls()
+        if self._page_fetch_active:
+            self._pending_page = (page_index, generation)
+        else:
+            self._start_page_fetch(page_index, generation)
+
+    def _start_page_fetch(self, page_index: int, generation: int) -> None:
+        source = self.source
+        if self._closing or source is None:
+            return
+        self._page_fetch_active = True
 
         def loaded(frame):
             if not self._closing and generation == self._generation:
                 self._display_page(page_index, frame)
 
-        run_in_background(
+        self._page_task = run_in_background(
             self,
             lambda: source.fetch_page(page_index),
             loaded,
             lambda exc: self._error(exc, generation),
         )
+        self._page_task.finished.connect(self._page_fetch_finished)
+
+    @pyqtSlot()
+    def _page_fetch_finished(self) -> None:
+        # Unlike result callbacks, this signal also runs after parent-level
+        # cancellation. A bound Qt slot disconnects when the window is deleted.
+        task, self._page_task = self._page_task, None
+        self._page_fetch_active = False
+        pending, self._pending_page = self._pending_page, None
+        if self._closing:
+            return
+        if task is not None and task.cancelled:
+            self._requested_page = self.page_index
+            self.status_label.setText("Preview loading cancelled.")
+            self._update_controls()
+            return
+        if not self._closing and pending is not None:
+            self._start_page_fetch(*pending)
 
     def _jump(self) -> None:
         try:
@@ -195,5 +246,7 @@ class PreviewWindow(QDialog):
     def done(self, result: int) -> None:
         self._closing = True
         self._generation += 1
+        self._pending_page = None
+        self.grid.prepare_close()
         cancel_tasks(self)
         super().done(result)

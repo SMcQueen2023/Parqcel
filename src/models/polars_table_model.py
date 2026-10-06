@@ -13,9 +13,10 @@ from parqcel.core.statistics import (
 )
 from parqcel.core.session import DatasetSession
 from parqcel.core.values import is_editable_dtype
+from models.table_presentation import TablePresentation
 
 
-class PolarsTableModel(QAbstractTableModel):
+class PolarsTableModel(QAbstractTableModel, TablePresentation):
     """Qt presentation and pagination for a GUI-independent dataset session."""
 
     dataset_changed = pyqtSignal()
@@ -30,6 +31,7 @@ class PolarsTableModel(QAbstractTableModel):
         session: DatasetSession | None = None,
     ) -> None:
         super().__init__()
+        self._init_presentation()
         if chunk_size <= 0:
             raise ValueError("Page size must be positive")
         self.session = (
@@ -79,15 +81,10 @@ class PolarsTableModel(QAbstractTableModel):
         return 0 if parent.isValid() else self._current_data.width
 
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
-        if not index.isValid():
-            return None
-        if role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole):
-            try:
-                value = self._current_data[index.row(), index.column()]
-                return str(value) if value is not None else ""
-            except IndexError:
-                return None
-        return None
+        return TablePresentation.data(self, index, role)
+
+    def _presentation_frame(self) -> pl.DataFrame:
+        return self._current_data
 
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
         if role != Qt.ItemDataRole.DisplayRole or section < 0:
@@ -97,10 +94,14 @@ class PolarsTableModel(QAbstractTableModel):
                 return None
             col_name = self._current_data.columns[section]
             return f"{col_name}\n({self._column_types[col_name]})"
-        return str(section + self._current_page * self.chunk_size)
+        return (
+            str(section + self._current_page * self.chunk_size + 1)
+            if section < self.rowCount()
+            else None
+        )
 
     def flags(self, index):
-        if not index.isValid():
+        if not self._valid_cell(index):
             return Qt.ItemFlag.NoItemFlags
         flags = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
         if is_editable_dtype(self._current_data.dtypes[index.column()]):
@@ -110,12 +111,7 @@ class PolarsTableModel(QAbstractTableModel):
     def setData(
         self, index: QModelIndex, value: object, role: int = Qt.ItemDataRole.EditRole
     ) -> bool:
-        if (
-            role != Qt.ItemDataRole.EditRole
-            or not index.isValid()
-            or index.row() >= self.rowCount()
-            or index.column() >= self.columnCount()
-        ):
+        if role != Qt.ItemDataRole.EditRole or not self._valid_cell(index):
             return False
         try:
             self.session.set_cell(
@@ -131,7 +127,17 @@ class PolarsTableModel(QAbstractTableModel):
             pl.exceptions.PolarsError,
         ):
             return False
-        self._notify_commit()
+        self._refresh_cache()
+        self.dataChanged.emit(
+            index,
+            index,
+            [
+                Qt.ItemDataRole.DisplayRole,
+                Qt.ItemDataRole.EditRole,
+                Qt.ItemDataRole.ToolTipRole,
+            ],
+        )
+        self.dataset_changed.emit()
         return True
 
     def load_next_page(self) -> None:
@@ -175,6 +181,21 @@ class PolarsTableModel(QAbstractTableModel):
             self._replace_data(
                 frame.with_columns(pl.lit(default_value).alias(column_name))
             )
+
+    def rename_column(self, old: str, new: str) -> None:
+        frame = self.get_dataframe()
+        if old not in frame.columns:
+            raise ValueError(f"Column '{old}' not found")
+        if not isinstance(new, str) or not new.strip():
+            raise ValueError("Column name cannot be empty")
+        if old == new:
+            return
+        if new in frame.columns:
+            raise ValueError(f"Column '{new}' already exists")
+        renamed = frame.rename({old: new})
+        if old in self._column_formats:
+            self._column_formats[new] = dict(self._column_formats[old])
+        self._replace_data(renamed)
 
     def get_column_statistics(self, column_name: str) -> str:
         return get_column_statistics(self.get_dataframe(), column_name)

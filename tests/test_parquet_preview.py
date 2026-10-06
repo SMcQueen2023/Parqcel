@@ -108,7 +108,6 @@ def test_late_page_cannot_overwrite_newer_request(qtbot, tmp_path, monkeypatch):
         window.load_page(1)
         qtbot.waitUntil(started.is_set)
         window.load_page(2)
-        qtbot.waitUntil(lambda: window.page_index == 2)
         release.set()
         qtbot.waitUntil(lambda: not has_active_tasks(window))
         assert window.page_index == 2

@@ -22,6 +22,27 @@ def qapp():
 
 
 @pytest.fixture(autouse=True)
+def isolate_workspace_preferences(monkeypatch, tmp_path):
+    monkeypatch.setenv("PARQCEL_SETTINGS_FILE", str(tmp_path / "preferences.ini"))
+
+
+@pytest.fixture(autouse=True)
+def reject_unexpected_message_boxes(monkeypatch):
+    # An unexpected error in a worker callback must fail CI, not wait forever
+    # inside a headless modal dialog. Dialog-specific tests override these spies.
+    messages = []
+
+    def record(parent, title, text, *args, **kwargs):
+        messages.append(f"{title}: {text}")
+        return QMessageBox.StandardButton.Ok
+
+    for method in ("critical", "warning", "information"):
+        monkeypatch.setattr(QMessageBox, method, record)
+    yield
+    assert not messages, "Unexpected message boxes: " + "; ".join(messages)
+
+
+@pytest.fixture(autouse=True)
 def dismiss_unsaved_changes(monkeypatch):
     # Headless test cleanup must never wait for a modal close confirmation.
     # Tests of save/cancel behavior override this default explicitly.

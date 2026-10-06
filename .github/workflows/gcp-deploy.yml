@@ -1,0 +1,54 @@
+name: Deploy to GCP
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: gcp-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      REGION: ${{ vars.GCP_REGION }}
+      REPOSITORY: ${{ vars.GCP_AR_REPO }}
+      API_SERVICE: ${{ vars.PARQCEL_API_SERVICE }}
+      WORKER_JOB: ${{ vars.PARQCEL_WORKER_JOB }}
+      IMAGE_TAG: ${{ github.sha }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_WIF_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+
+      - name: Deploy API via Cloud Build
+        run: |
+          gcloud builds submit \
+            --project "${PROJECT_ID}" \
+            --config deploy/gcp/cloudbuild-api.yaml \
+            --substitutions _REGION="${REGION}",_REPOSITORY="${REPOSITORY}",_SERVICE="${API_SERVICE}",_IMAGE_TAG="${IMAGE_TAG}"
+
+      - name: Deploy worker job via Cloud Build
+        run: |
+          gcloud builds submit \
+            --project "${PROJECT_ID}" \
+            --config deploy/gcp/cloudbuild-worker.yaml \
+            --substitutions _REGION="${REGION}",_REPOSITORY="${REPOSITORY}",_JOB="${WORKER_JOB}",_IMAGE_TAG="${IMAGE_TAG}"

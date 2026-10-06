@@ -7,7 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-05
+
 ### Added
+
+- Shared spreadsheet workspace for editing and lazy previews, with System, Light and Dark appearance settings.
+- Clipboard copy with optional headers, searchable column controls, column renaming, view-only number/date formatting and selection summaries.
+- Find and Go To, a column inspector with exact cell values and scoped background profiles.
+- Recent files, drag-and-drop Parquet preview, Save/Save As and atomic CSV export.
+- About dialog and consistent package/installer version identification.
 
 - Read-only Parquet preview with asynchronous lazy pages, schema and row counts.
 - Qt-independent dataset sessions with revisions, saved-state tracking and bounded history.
@@ -24,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Documentation distinguishes lazy preview from eager editing and treats Excel as a legacy optional path.
 
 ### Fixed
+
+- Editing a cell preserves grid selection through targeted model updates; editor and preview row numbers both start at one.
+- Light-theme pagination contrast and consistent controls across editor and preview.
 
 - Invalid edits preserve dtype, data and redo history; single-column sorting participates in undo.
 - Footer, headers, pagination and action state follow committed dataset changes.

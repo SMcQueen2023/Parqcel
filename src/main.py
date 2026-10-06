@@ -2,6 +2,7 @@ from PyQt6.QtWidgets import QApplication
 from PyQt6.QtGui import QIcon
 from PyQt6.QtCore import QTimer
 from app.main_window import MainWindow
+from app.theme import setup_theme
 from logging_config import configure_logging
 import importlib.resources as resources
 import logging
@@ -14,6 +15,9 @@ def main():
     logger.info("Starting Parqcel application")
 
     app = QApplication([])
+    app.setApplicationName("Parqcel")
+    app.setOrganizationName("Parqcel")
+    setup_theme(app)
 
     # Create and show the main window
     window = MainWindow()

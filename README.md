@@ -7,15 +7,39 @@
 
 Parqcel is a desktop Parquet viewer and editor built with PyQt6 and Polars. It supports CSV import, filtering, sorting, column statistics and typed cell editing. Optional packages add feature engineering, PCA/UMAP and an AI assistant.
 
-Use **File → Preview Parquet...** to inspect a file through read-only lazy pages. Use **File → Open File** to load a complete dataset for editing. Preview and editable pagination have different memory requirements; see [PERFORMANCE.md](PERFORMANCE.md).
+Use **File → Preview Parquet...** to inspect a file through read-only lazy pages. Use **File → Open for editing...** to load a complete dataset for editing. Preview and editable pagination have different memory requirements; see [PERFORMANCE.md](PERFORMANCE.md).
+
+## ☁️ Cloud-Native GCP (Phase 1)
+
+Parqcel now includes Phase 1 cloud-native deployment scaffolding for Google Cloud Platform with CI/CD.
+
+- Architecture and rollout guide: [docs/gcp-phase1-cloud-native.md](docs/gcp-phase1-cloud-native.md)
+- GitHub Actions deployment workflow: [.github/workflows/gcp-deploy.yml](.github/workflows/gcp-deploy.yml)
+- Cloud Build configs and Dockerfiles: [deploy/gcp](deploy/gcp)
+- Terraform bootstrap for base GCP resources: [deploy/gcp/terraform](deploy/gcp/terraform)
+
+---
 
 ## Desktop workflow
 
 1. Preview a Parquet file, or open it in the editor. CSV import offers **Strings (preserve text)** or **Infer numbers and other types**; strings are the default.
-2. Navigate pages and right-click a column header to sort, filter, convert its type or request statistics.
+2. Navigate pages and right-click a column header to sort, filter, rename, format, convert its type or request statistics. **View → Columns** searches and shows/hides columns; drag headers to rearrange the view.
 3. Edit supported scalar cells, add columns or drop columns. Invalid edits leave the dataset and history unchanged. Complex column types remain read-only.
 4. Use Undo/Redo buttons or the platform's standard keyboard shortcuts. History is bounded; an operation may exceed the retained history budget.
-5. Choose **File → Save As...** to export Parquet. Saving writes a temporary sibling file and replaces the destination after successful output.
+5. Use **Save** to update an existing Parquet file, **Save As...** for a new Parquet destination, or **Export CSV...** for a CSV snapshot. Writes use a temporary sibling file and replace the destination after successful output. CSV export leaves the Parquet saved/unsaved state unchanged.
+
+### Spreadsheet workspace
+
+- **View → Appearance** offers System, Light and Dark themes. The editor and preview share grid controls and appearance.
+- **Ctrl+C** copies a rectangular selection as tab-separated raw values; **Copy with headers** includes column names. Display rounding does not affect copied values. Hidden columns are omitted and displayed column order is respected. Clipboard output is limited to 100,000 cells and 10 MiB.
+- **Display format** controls numbers, percentages, scientific notation and dates without changing the underlying data. Null values are shown explicitly; the inspector displays the full unformatted cell value (up to 100,000 characters).
+- The selection summary reports count, non-null/null counts and finite numeric sum, average, minimum and maximum. It covers selected visible cells on the current page, up to 50,000 cells.
+- **Ctrl+F** finds literal values with case and column options, and **Ctrl+G** jumps to a row. Editor searches cover the complete loaded dataset; preview searches cover only the displayed page. Search uses raw values, independently of display formatting.
+- **Inspector** shows the schema and selected cell. Request a column profile to calculate statistics in the background: the loaded dataset in the editor, or the current page in preview. Exact distinct counts can require substantial work on high-cardinality columns.
+- Column widths, visibility, order and display formats are remembered by file path. These preferences do not modify the file or add undo history. Column renaming is an editable dataset operation and can be undone.
+- The start screen and File menu list recent files. Dropping a Parquet file opens read-only preview; dropping a CSV file starts the editor's import workflow.
+
+**Help → About Parqcel** reports the application version. Package and installer versions are **0.2.0** for this workspace release.
 
 The title marks unsaved changes. Opening another file or closing the window offers Save, Discard and Cancel. Undoing back to the saved state clears the unsaved marker.
 

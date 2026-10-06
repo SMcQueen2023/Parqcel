@@ -1,0 +1,22 @@
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app/src
+
+WORKDIR /app
+
+# Minimal runtime utilities
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install package and API runtime dependencies
+COPY pyproject.toml README.md ./
+COPY src ./src
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir . fastapi uvicorn[standard]
+
+EXPOSE 8080
+
+CMD ["uvicorn", "cloud.api:app", "--host", "0.0.0.0", "--port", "8080"]

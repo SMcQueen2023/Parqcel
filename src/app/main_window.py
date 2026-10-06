@@ -1,7 +1,6 @@
 from PyQt6.QtWidgets import (
     QMainWindow,
     QFileDialog,
-    QTableView,
     QVBoxLayout,
     QWidget,
     QPushButton,
@@ -14,14 +13,24 @@ from PyQt6.QtWidgets import (
     QDialog,
     QTextEdit,
     QDockWidget,
-    QSizePolicy,
     QProgressBar,
+    QStackedWidget,
+    QListWidget,
+    QToolBar,
+    QApplication,
 )
-from PyQt6.QtGui import QAction, QFont, QKeySequence
+from PyQt6.QtGui import QAction, QActionGroup, QKeySequence, QIntValidator
 from PyQt6.QtCore import Qt, QPoint, QTimer
 import importlib.util
 import polars as pl
 import os
+import json
+from pathlib import Path
+from app.icons import line_icon
+from app.preferences import settings
+from app.theme import apply_theme, theme_mode
+from app.widgets.data_grid import DataGrid
+from parqcel import __version__
 from app.widgets.filter_dialog import apply_filter
 from models.polars_table_model import PolarsTableModel  # Import the model class
 from app.widgets.edit_menu_gui import AddColumnDialog, MultiSortDialog
@@ -47,6 +56,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Parqcel")
         self.setMinimumSize(800, 600)
+        self.resize(1180, 760)
+        self.setAcceptDrops(True)
         self.model = None
         self._closing = False
         self._close_ready = False
@@ -54,135 +65,87 @@ class MainWindow(QMainWindow):
         self._task_generation = 0
         self._statistics_cache = {}
         self._save_task = None
-
-        # Track temp files for cleanup on close
+        self._export_task = None
         self.temp_files = TempFileManager()
-
-        self._createMenuBar()
-
-        self.table_view = QTableView()
+        self.grid = DataGrid(self)
+        self.table_view = self.grid.table_view
         self.table_view.horizontalHeader().setContextMenuPolicy(
             Qt.ContextMenuPolicy.CustomContextMenu
         )
         self.table_view.horizontalHeader().customContextMenuRequested.connect(
             self.show_context_menu
         )
+        self._createMenuBar()
+        self._create_toolbar()
 
-        layout = QVBoxLayout()
+        container = QWidget(self)
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(16, 12, 16, 8)
+        layout.setSpacing(8)
+        heading = QHBoxLayout()
+        self.dataset_title = QLabel("Parqcel")
+        self.dataset_title.setTextFormat(Qt.TextFormat.PlainText)
+        self.dataset_title.setObjectName("workspaceTitle")
+        self.dataset_subtitle = QLabel("Explore your Parquet data")
+        self.dataset_subtitle.setObjectName("workspaceSubtitle")
+        titles = QVBoxLayout()
+        titles.setSpacing(2)
+        titles.addWidget(self.dataset_title)
+        titles.addWidget(self.dataset_subtitle)
+        heading.addLayout(titles, 1)
+        self.mode_badge = QLabel("Ready")
+        self.mode_badge.setObjectName("modeBadge")
+        heading.addWidget(self.mode_badge)
+        layout.addLayout(heading)
+        self.workspace_stack = QStackedWidget()
+        self.empty_state = self._create_empty_state()
+        self.workspace_stack.addWidget(self.empty_state)
+        self.workspace_stack.addWidget(self.grid)
+        layout.addWidget(self.workspace_stack, 1)
 
-        # Button Layout for pagination and actions
         self.pagination_layout = QHBoxLayout()
-        self.first_button = QPushButton("⏮")
-        self.prev_button = QPushButton("⏪")
-        self.next_button = QPushButton("⏩")
-        self.last_button = QPushButton("⏭")
+        self.first_button = self._page_button(
+            "First page",
+            "first",
+            self.load_first_page,
+        )
+        self.prev_button = self._page_button(
+            "Previous page", "previous", self.load_previous_page
+        )
+        self.next_button = self._page_button("Next page", "next", self.load_next_page)
+        self.last_button = self._page_button("Last page", "last", self.load_last_page)
+        self.page_info_label = QLabel("No dataset open")
+        self.page_info_label.setObjectName("secondaryText")
         self.page_input = QLineEdit()
-        self.page_input.setPlaceholderText("Jump to page")
-        self.page_input.setFixedWidth(100)
-        self.jump_button = QPushButton("Jump")
-        self.page_info_label = QLabel()
-        self.undo_button = QPushButton("Undo")
-        self.redo_button = QPushButton("Redo")
-
-        self.first_button.setToolTip("First Page")
-        self.prev_button.setToolTip("Previous Page")
-        self.next_button.setToolTip("Next Page")
-        self.last_button.setToolTip("Last Page")
-
-        # Footer column statistics layout (Row count, Column count, Column type count)
-        self.stats_layout = QVBoxLayout()
+        self.page_input.setPlaceholderText("Page")
+        self.page_input.setAccessibleName("Page number")
+        self.page_input.setMaximumWidth(85)
+        self.page_input.setValidator(QIntValidator(1, 2147483647, self))
+        self.page_input.returnPressed.connect(self.jump_to_page)
+        self.jump_button = QPushButton("Go")
+        self.jump_button.clicked.connect(self.jump_to_page)
         self.row_count_label = QLabel("Total Rows: 0")
         self.total_column_count_label = QLabel("Total Columns: 0")
-        self.column_type_count_label = QLabel("Column Type Count: {}")
-        self.stats_layout.addWidget(self.row_count_label)
-        self.stats_layout.addWidget(self.total_column_count_label)
-        self.stats_layout.addWidget(self.column_type_count_label)
-
-        # Improve pagination button appearance
-        pagination_font = QFont()
-        pagination_font.setPointSize(14)
-        pagination_font.setBold(True)
-        pagination_buttons = [
+        self.column_type_count_label = QLabel("Column Type Count: {}", self)
+        self.column_type_count_label.hide()
+        self.pagination_layout.addWidget(self.row_count_label)
+        self.pagination_layout.addWidget(self.total_column_count_label)
+        self.pagination_layout.addStretch(1)
+        for widget in (
             self.first_button,
             self.prev_button,
+            self.page_info_label,
             self.next_button,
             self.last_button,
-        ]
-        for button in pagination_buttons:
-            button.setFont(pagination_font)
-            button.setFixedSize(36, 32)
-            button.setCursor(Qt.CursorShape.PointingHandCursor)
-            # Modern plain white icon on transparent background
-            button.setStyleSheet(
-                "QPushButton {"
-                "  color: #FFFFFF;"
-                "  background-color: transparent;"
-                "  border: none;"
-                "  border-radius: 6px;"
-                "  padding: 2px;"
-                "}"
-                "QPushButton:hover {"
-                "  background-color: rgba(255,255,255,0.03);"
-                "}"
-                "QPushButton:pressed {"
-                "  background-color: rgba(255,255,255,0.06);"
-                "}"
-            )
-
-        # Set button styles
-        self.pagination_layout.addWidget(self.first_button)
-        self.pagination_layout.addWidget(self.prev_button)
-        self.pagination_layout.addWidget(self.next_button)
-        self.pagination_layout.addWidget(self.last_button)
-        self.pagination_layout.addWidget(self.page_input)
-
-        # Cap Jump/Undo/Redo sizes to avoid stretching on large windows
-        self.jump_button.setFixedWidth(80)
-        self.jump_button.setSizePolicy(
-            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
-        )
-        self.undo_button.setFixedWidth(80)
-        self.undo_button.setSizePolicy(
-            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
-        )
-        self.redo_button.setFixedWidth(80)
-        self.redo_button.setSizePolicy(
-            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
-        )
-
-        # Page info label should expand to absorb available space so buttons don't stretch
-        self.page_info_label.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
-        )
-
-        self.pagination_layout.addWidget(self.jump_button)
-        self.pagination_layout.addWidget(self.page_info_label)
-        self.pagination_layout.addWidget(self.undo_button)
-        self.pagination_layout.addWidget(self.redo_button)
-
-        # Add buttons to the layout
+            self.page_input,
+            self.jump_button,
+        ):
+            self.pagination_layout.addWidget(widget)
         layout.addLayout(self.pagination_layout)
-        layout.addWidget(self.table_view)
-        layout.addLayout(self.stats_layout)
-
-        # Set the main layout
-        container = QWidget()
-        container.setLayout(layout)
         self.setCentralWidget(container)
-
-        # Connect Click events to methods
-        self.first_button.clicked.connect(self.load_first_page)
-        self.prev_button.clicked.connect(self.load_previous_page)
-        self.next_button.clicked.connect(self.load_next_page)
-        self.last_button.clicked.connect(self.load_last_page)
-        self.jump_button.clicked.connect(self.jump_to_page)
-        self.undo_button.clicked.connect(self.undo)
-        self.redo_button.clicked.connect(self.redo)
-        self.undo_button.setEnabled(False)
-        self.redo_button.setEnabled(False)
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)
-        self.progress.setMaximumWidth(160)
+        self.progress.setMaximumWidth(140)
         self.progress.hide()
         self.cancel_button = QPushButton("Cancel work")
         self.cancel_button.clicked.connect(self.cancel_work)
@@ -192,6 +155,180 @@ class MainWindow(QMainWindow):
         self._close_timer = QTimer(self)
         self._close_timer.setInterval(50)
         self._close_timer.timeout.connect(self._finish_close)
+        self._refresh_recent_files()
+        self.update_page_info()
+        self._update_file_actions()
+
+    def _page_button(self, label, icon, callback):
+        button = QPushButton(line_icon(icon), "")
+        button.setToolTip(label)
+        button.setAccessibleName(label)
+        button.setFixedWidth(32)
+        button.clicked.connect(callback)
+        return button
+
+    def _create_toolbar(self):
+        self.toolbar = QToolBar("Dataset", self)
+        self.toolbar.setMovable(False)
+        self.toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.addToolBar(self.toolbar)
+        icons = {
+            self.open_action: "open",
+            self.preview_action: "preview",
+            self.save_action: "save",
+            self.undo_action: "undo",
+            self.redo_action: "redo",
+            self.grid.copy_action: "copy",
+            self.grid.find_action: "find",
+            self.grid.columns_action: "columns",
+            self.grid.inspector_action: "inspector",
+        }
+        for action, icon in icons.items():
+            action.setIcon(line_icon(icon))
+        for action in (self.preview_action, self.open_action, self.save_action):
+            self.toolbar.addAction(action)
+        self.toolbar.addSeparator()
+        for action in (self.undo_action, self.redo_action):
+            self.toolbar.addAction(action)
+        self.undo_button = self.toolbar.widgetForAction(self.undo_action)
+        self.redo_button = self.toolbar.widgetForAction(self.redo_action)
+        self.toolbar.addSeparator()
+        for action in (
+            self.grid.copy_action,
+            self.grid.find_action,
+            self.grid.columns_action,
+            self.grid.inspector_action,
+        ):
+            self.toolbar.addAction(action)
+
+    def _create_empty_state(self):
+        panel = QWidget()
+        panel.setObjectName("emptyState")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(60, 35, 60, 35)
+        layout.addStretch(1)
+        title = QLabel("A clearer view of your data")
+        title.setObjectName("workspaceTitle")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title)
+        hint = QLabel(
+            "Drop a Parquet file to preview it, or open a dataset for editing."
+        )
+        hint.setWordWrap(True)
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hint.setObjectName("workspaceSubtitle")
+        layout.addWidget(hint)
+        actions = QHBoxLayout()
+        actions.addStretch(1)
+        preview = QPushButton("Preview Parquet...")
+        preview.setObjectName("primaryButton")
+        preview.clicked.connect(self.preview_parquet)
+        actions.addWidget(preview)
+        open_button = QPushButton("Open for editing...")
+        open_button.clicked.connect(self.open_file)
+        actions.addWidget(open_button)
+        actions.addStretch(1)
+        layout.addLayout(actions)
+        layout.addSpacing(20)
+        recent_label = QLabel("Recent files")
+        recent_label.setObjectName("sectionTitle")
+        layout.addWidget(recent_label)
+        self.recent_list = QListWidget()
+        self.recent_list.setMaximumHeight(180)
+        self.recent_list.itemActivated.connect(
+            lambda item: self._open_recent(item.data(Qt.ItemDataRole.UserRole))
+        )
+        layout.addWidget(self.recent_list)
+        layout.addStretch(1)
+        return panel
+
+    def _recent_files(self):
+        try:
+            records = json.loads(str(settings().value("files/recent", "[]")))
+            return [
+                r
+                for r in records
+                if isinstance(r, dict)
+                and isinstance(r.get("path"), str)
+                and r.get("mode") in ("preview", "editor")
+            ][:10]
+        except (ValueError, TypeError):
+            return []
+
+    def _remember_file(self, path, mode="editor"):
+        path = str(Path(path).absolute())
+        records = [
+            r
+            for r in self._recent_files()
+            if os.path.normcase(r["path"]) != os.path.normcase(path)
+        ]
+        records.insert(0, {"path": path, "mode": mode})
+        settings().setValue("files/recent", json.dumps(records[:10]))
+        self._refresh_recent_files()
+
+    def _refresh_recent_files(self):
+        from PyQt6.QtWidgets import QListWidgetItem
+
+        self.recent_menu.clear()
+        self.recent_list.clear()
+        for record in self._recent_files():
+            label = f"{Path(record['path']).name}  ?  {record['mode'].title()}"
+            action = self.recent_menu.addAction(label)
+            action.setToolTip(record["path"])
+            action.triggered.connect(
+                lambda checked=False, r=record: self._open_recent(r)
+            )
+            item = QListWidgetItem(label)
+            item.setToolTip(record["path"])
+            item.setData(Qt.ItemDataRole.UserRole, record)
+            self.recent_list.addItem(item)
+        self.recent_menu.setEnabled(bool(self.recent_list.count()))
+        if not self.recent_list.count():
+            item = QListWidgetItem("Opened files will appear here")
+            item.setFlags(Qt.ItemFlag.NoItemFlags)
+            self.recent_list.addItem(item)
+
+    def _open_recent(self, record):
+        if not record or self._closing:
+            return
+        if record["mode"] == "preview":
+            self._show_preview(record["path"])
+        else:
+            self._open_path(record["path"])
+
+    def dragEnterEvent(self, event):
+        urls = event.mimeData().urls()
+        if (
+            len(urls) == 1
+            and urls[0].isLocalFile()
+            and Path(urls[0].toLocalFile()).suffix.lower() in (".parquet", ".csv")
+        ):
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        urls = event.mimeData().urls()
+        if len(urls) != 1 or not urls[0].isLocalFile() or self._closing:
+            return
+        path = urls[0].toLocalFile()
+        suffix = Path(path).suffix.lower()
+        if suffix == ".parquet":
+            self._show_preview(path)
+        elif suffix == ".csv":
+            self._open_path(path)
+        else:
+            return
+        event.acceptProposedAction()
+
+    def _update_file_actions(self):
+        loaded = self.model is not None and not self._closing
+        busy = self._save_task is not None and self._save_task.is_running
+        self.save_action.setEnabled(loaded and not busy)
+        self.save_as_action.setEnabled(loaded and not busy)
+        self.export_action.setEnabled(
+            loaded
+            and not busy
+            and not (self._export_task and self._export_task.is_running)
+        )
 
     def _optional_modules_available(self, *module_names):
         return all(
@@ -219,24 +356,32 @@ class MainWindow(QMainWindow):
         file_menu = menu_bar.addMenu("File")
 
         # Open action
-        open_action = QAction("Open File", self)
+        open_action = self.open_action = QAction("Open for editing...", self)
         open_action.setShortcut(QKeySequence.StandardKey.Open)
         open_action.triggered.connect(self.open_file)
         file_menu.addAction(open_action)
-        preview_action = QAction("Preview Parquet...", self)
+        preview_action = self.preview_action = QAction("Preview Parquet...", self)
         preview_action.triggered.connect(self.preview_parquet)
         file_menu.addAction(preview_action)
+        self.recent_menu = file_menu.addMenu("Recent files")
+        file_menu.addSeparator()
 
         # Save As action
-        save_action = QAction("Save As...", self)
+        save_action = self.save_action = QAction("Save", self)
         save_action.setShortcut(QKeySequence.StandardKey.Save)
-        save_action.triggered.connect(self.save_parquet)
+        save_action.triggered.connect(self.save_current)
         file_menu.addAction(save_action)
+        self.save_as_action = QAction("Save As...", self)
+        self.save_as_action.setShortcut(QKeySequence.StandardKey.SaveAs)
+        self.save_as_action.triggered.connect(self.save_parquet)
+        file_menu.addAction(self.save_as_action)
+        self.export_action = QAction("Export CSV...", self)
+        self.export_action.triggered.connect(self.export_csv)
+        file_menu.addAction(self.export_action)
 
         # Generate statistics action
         stats_action = QAction("Generate Statistics", self)
         stats_action.triggered.connect(self.generate_statistics)
-        file_menu.addAction(stats_action)
 
         # Edit menu
         edit_menu = menu_bar.addMenu("Edit")
@@ -250,6 +395,15 @@ class MainWindow(QMainWindow):
         self.redo_action.triggered.connect(self.redo)
         self.redo_action.setEnabled(False)
         edit_menu.addAction(self.redo_action)
+        edit_menu.addSeparator()
+        for action in (
+            self.grid.copy_action,
+            self.grid.copy_headers_action,
+            self.grid.find_action,
+            self.grid.go_to_action,
+            self.grid.rename_action,
+        ):
+            edit_menu.addAction(action)
 
         # Add column action
         add_column_action = QAction("Add Column", self)
@@ -261,8 +415,32 @@ class MainWindow(QMainWindow):
         sort_columns_action.triggered.connect(self.handle_multi_sort)
         edit_menu.addAction(sort_columns_action)
 
+        view_menu = menu_bar.addMenu("View")
+        for action in (
+            self.grid.columns_action,
+            self.grid.format_action,
+            self.grid.inspector_action,
+        ):
+            view_menu.addAction(action)
+        theme_menu = view_menu.addMenu("Appearance")
+        theme_group = QActionGroup(self)
+        theme_group.setExclusive(True)
+        for mode, label in (
+            ("system", "Follow system"),
+            ("light", "Light"),
+            ("dark", "Dark"),
+        ):
+            action = QAction(label, self, checkable=True)
+            action.setChecked(theme_mode() == mode)
+            action.triggered.connect(
+                lambda checked=False, m=mode: apply_theme(QApplication.instance(), m)
+            )
+            theme_group.addAction(action)
+            theme_menu.addAction(action)
+
         # Analysis menu
         analysis_menu = menu_bar.addMenu("Analysis")
+        analysis_menu.addAction(stats_action)
         self.featurize_action = QAction("Featurize Columns...", self)
         self.featurize_action.triggered.connect(self.handle_featurize)
         analysis_menu.addAction(self.featurize_action)
@@ -280,17 +458,33 @@ class MainWindow(QMainWindow):
         settings_menu.addAction(self.ai_settings_action)
 
         self._configure_optional_actions()
+        help_menu = menu_bar.addMenu("Help")
+        about = help_menu.addAction("About Parqcel")
+        about.triggered.connect(
+            lambda: QMessageBox.about(
+                self,
+                "About Parqcel",
+                f"Parqcel {__version__}\n\nParquet viewing, editing and analysis.",
+            )
+        )
 
     def preview_parquet(self):
-        from app.preview_window import PreviewWindow
-
         path, _ = QFileDialog.getOpenFileName(
             self, "Preview Parquet", "", "Parquet Files (*.parquet)"
         )
         if path and not self._closing:
-            preview = PreviewWindow(path, parent=self)
-            preview.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-            preview.show()
+            self._show_preview(path)
+
+    def _show_preview(self, path):
+        from app.preview_window import PreviewWindow
+
+        if self._closing:
+            return
+        preview = PreviewWindow(path, parent=self)
+        preview.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        preview.show()
+        if Path(path).is_file():
+            self._remember_file(path, "preview")
 
     def open_file(self):
         if self._closing:
@@ -299,6 +493,11 @@ class MainWindow(QMainWindow):
             self, "Open Dataset", "", "Data Files (*.parquet *.csv *.xlsx)"
         )
         if not file_path:
+            return
+        self._open_path(file_path)
+
+    def _open_path(self, file_path):
+        if self._closing:
             return
         csv_types = "strings"
         if file_path.lower().endswith(".csv"):
@@ -333,6 +532,7 @@ class MainWindow(QMainWindow):
                 )
                 return
             self.set_model(PolarsTableModel(df, source_path=file_path))
+            self._remember_file(file_path)
 
         return self._run_task(
             "Opening dataset...",
@@ -348,11 +548,13 @@ class MainWindow(QMainWindow):
             except TypeError:
                 pass
         self.model = model
-        self.table_view.setModel(model)
+        self.grid.set_model(
+            model, identity=model.session.source_path or "", scope_label="Dataset"
+        )
+        self.workspace_stack.setCurrentWidget(self.grid)
         model.dataset_changed.connect(self._dataset_changed)
         model.pagination_changed.connect(self.update_page_info)
         # Avoid scanning every visible cell to resize rows on a large dataset.
-        self.table_view.horizontalHeader().setDefaultSectionSize(140)
         self._dataset_changed()
 
     def _dataset_changed(self):
@@ -370,6 +572,15 @@ class MainWindow(QMainWindow):
             os.path.basename(session.source_path) if session.source_path else "Untitled"
         )
         self.setWindowTitle(f"{name}{' *' if session.dirty else ''} — Parqcel")
+        self.dataset_title.setText(name)
+        self.dataset_title.setToolTip(session.source_path or "Untitled dataset")
+        self.dataset_subtitle.setText(
+            "Changes not saved" if session.dirty else "Ready to explore and edit"
+        )
+        self.mode_badge.setText(
+            "Editor · unsaved changes" if session.dirty else "Editor"
+        )
+        self._update_file_actions()
 
     def undo(self):
         if self.model is not None:
@@ -401,6 +612,7 @@ class MainWindow(QMainWindow):
             if generation == self._task_generation:
                 if self.statusBar().currentMessage() == label:
                     self.statusBar().clearMessage()
+            self._update_file_actions()
 
         return run_in_background(self, func, on_success, error, finished)
 
@@ -425,6 +637,8 @@ class MainWindow(QMainWindow):
         return self._run_task(label, lambda: operation(snapshot), apply)
 
     def cancel_work(self):
+        for grid in self.findChildren(DataGrid):
+            grid.cancel_pending_work()
         cancel_tasks(self)
         self._load_generation += 1
         self._task_generation += 1
@@ -448,24 +662,44 @@ class MainWindow(QMainWindow):
             QMessageBox.StandardButton.Cancel,
         )
         if choice == QMessageBox.StandardButton.Save:
-            self.save_parquet(on_saved=proceed)
+            self.save_current(on_saved=proceed)
         elif choice == QMessageBox.StandardButton.Discard:
             proceed()
 
     def save_parquet(self, checked=False, *, on_saved=None):
+        """Save As, retaining the public entry point used by older integrations."""
+        if self._saving_busy() or not self.is_model_loaded():
+            return
+        file_name, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Parquet As",
+            self.model.session.source_path or "",
+            "Parquet Files (*.parquet)",
+        )
+        if not file_name:
+            return
+        if not file_name.lower().endswith(".parquet"):
+            file_name += ".parquet"
+        return self._save_to(file_name, on_saved=on_saved)
+
+    def save_current(self, checked=False, *, on_saved=None):
+        if self._saving_busy() or not self.is_model_loaded():
+            return
+        path = self.model.session.source_path
+        if path and Path(path).suffix.lower() == ".parquet" and Path(path).is_file():
+            return self._save_to(path, on_saved=on_saved)
+        return self.save_parquet(on_saved=on_saved)
+
+    def _saving_busy(self):
         if self._save_task is not None and self._save_task.is_running:
             self.statusBar().showMessage(
                 "A save is already running. Wait for it to finish before saving again.",
                 5000,
             )
-            return
-        if not self.is_model_loaded():
-            return
-        file_name, _ = QFileDialog.getSaveFileName(
-            self, "Save Parquet File", "", "Parquet Files (*.parquet)"
-        )
-        if not file_name:
-            return
+            return True
+        return False
+
+    def _save_to(self, file_name, *, on_saved=None):
         model = self.model
         revision = model.session.revision
         snapshot = model.get_dataframe()
@@ -475,6 +709,8 @@ class MainWindow(QMainWindow):
                 return
             if model.session.mark_saved(revision, file_name):
                 self._dataset_changed()
+                self.grid.set_identity(str(file_name))
+                self._remember_file(file_name)
                 if on_saved is not None:
                     on_saved()
             else:
@@ -487,7 +723,32 @@ class MainWindow(QMainWindow):
             lambda: write_dataset_atomic(snapshot, file_name),
             saved,
         )
+        self._update_file_actions()
         return self._save_task
+
+    def export_csv(self, checked=False):
+        if self._closing or not self.is_model_loaded():
+            return
+        if self._export_task is not None and self._export_task.is_running:
+            self.statusBar().showMessage("A CSV export is already running.", 5000)
+            return
+        source = self.model.session.source_path
+        suggestion = str(Path(source).with_suffix(".csv")) if source else "dataset.csv"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Dataset as CSV", suggestion, "CSV Files (*.csv)"
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".csv"):
+            path += ".csv"
+        snapshot = self.model.get_dataframe()
+        self._export_task = self._run_task(
+            "Exporting CSV...",
+            lambda: write_dataset_atomic(snapshot, path, format="csv"),
+            lambda _: self.statusBar().showMessage(f"CSV exported: {path}", 5000),
+        )
+        self._update_file_actions()
+        return self._export_task
 
     def is_model_loaded(self):
         if not hasattr(self, "model") or self.model is None:
@@ -530,10 +791,25 @@ class MainWindow(QMainWindow):
 
     def update_page_info(self):
         if self.model is None:
+            for control in (
+                self.first_button,
+                self.prev_button,
+                self.next_button,
+                self.last_button,
+                self.page_input,
+                self.jump_button,
+            ):
+                control.setEnabled(False)
             return
         max_pages = self.model.get_max_pages()
         current_page = self.model.get_current_page() + 1 if max_pages else 0
         self.page_info_label.setText(f"Page {current_page} of {max_pages}")
+        self.first_button.setEnabled(current_page > 1)
+        self.prev_button.setEnabled(current_page > 1)
+        self.next_button.setEnabled(current_page < max_pages)
+        self.last_button.setEnabled(current_page < max_pages)
+        self.page_input.setEnabled(max_pages > 0)
+        self.jump_button.setEnabled(max_pages > 0)
         self.page_input.clear()
 
     def show_context_menu(self, pos: QPoint):
@@ -544,8 +820,17 @@ class MainWindow(QMainWindow):
             return
         column_name = self.model._data.columns[column]
         dtype = self.model._data.schema[column_name]
+        self.grid.set_current_column(column)
 
         menu = QMenu(self)
+        for shared_action in (
+            self.grid.rename_action,
+            self.grid.format_action,
+            self.grid.columns_action,
+            self.grid.inspector_action,
+        ):
+            menu.addAction(shared_action)
+        menu.addSeparator()
 
         # Add sorting and drop options
         sort_asc = menu.addAction("Sort Ascending")
@@ -970,6 +1255,8 @@ class MainWindow(QMainWindow):
             )
 
     def _begin_close(self):
+        for grid in self.findChildren(DataGrid):
+            grid.prepare_close()
         self._closing = True
         cancel_tasks(self)
         self.setEnabled(False)

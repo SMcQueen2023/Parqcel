@@ -1,0 +1,45 @@
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+substitutions:
+  _REGION: us-central1
+  _REPOSITORY: parqcel
+  _SERVICE: parqcel-api
+  _IMAGE_TAG: latest
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    id: Build API image
+    args:
+      - build
+      - -f
+      - deploy/gcp/docker/Dockerfile.api
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/parqcel-api:${_IMAGE_TAG}
+      - .
+
+  - name: gcr.io/cloud-builders/docker
+    id: Push API image
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/parqcel-api:${_IMAGE_TAG}
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    id: Deploy API service
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE}
+      - --platform=managed
+      - --region=${_REGION}
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/parqcel-api:${_IMAGE_TAG}
+      - --allow-unauthenticated
+      - --port=8080
+      - --cpu=1
+      - --memory=1Gi
+      - --concurrency=80
+      - --max-instances=10
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/parqcel-api:${_IMAGE_TAG}
