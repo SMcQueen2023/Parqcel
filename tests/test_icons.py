@@ -7,7 +7,7 @@ from app.icons import line_icon
 
 @pytest.mark.parametrize(
     "name",
-    "open preview save undo redo copy find columns inspector first previous next last".split(),
+    "open preview save undo redo copy add paste find columns inspector first previous next last".split(),
 )
 def test_workspace_icons_render_at_toolbar_and_hidpi_sizes(qapp, name):
     icon = line_icon(name)

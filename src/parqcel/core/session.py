@@ -1,12 +1,14 @@
 """Transactional dataset ownership, revisions and bounded undo history."""
 
 from dataclasses import dataclass
+from collections.abc import Sequence
 from pathlib import Path
 from uuid import uuid4
 
 import polars as pl
 
 from .values import parse_cell_value
+from .rows import insert_blank_rows, insert_tsv_rows
 
 
 @dataclass(frozen=True)
@@ -121,6 +123,16 @@ class DatasetSession:
         self._current = self._undo.pop()
         self.revision += 1
         return True
+
+    def insert_rows(self, position: int, count: int = 1) -> None:
+        """Insert null rows as one transaction, validating before history changes."""
+        self.commit(insert_blank_rows(self._current.frame, position, count))
+
+    def insert_pasted_rows(
+        self, position: int, text: str, columns: Sequence[str]
+    ) -> None:
+        """Insert a complete typed TSV paste as one undoable transaction."""
+        self.commit(insert_tsv_rows(self._current.frame, position, text, columns))
 
     def redo(self) -> bool:
         if not self._redo:

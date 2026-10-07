@@ -38,6 +38,8 @@ The dummy backend is offline. The OpenAI backend uses the configured service end
 
 The OpenAI backend sets a 30-second timeout for each SDK request. Its compatibility fallback may issue a second request; this is not a 30-second total deadline. Local model loading and inference can take longer.
 
+Row insertion and Parquet optimization run locally and do not call an AI provider. Clipboard insertion reads the supplied text as typed tab-separated data, without executing formulas or inferring a header. Optimization writes sampled and full dataset candidates to the operating system's temporary directory; final export uses a temporary file beside the destination. These files contain dataset values and receive ordinary filesystem protection. Normal completion, cancellation and handled failures clean up temporary output; process crashes may leave files behind.
+
 ## Credentials and configuration
 
 Settings are loaded from `~/.parqcel/config.json`, or the file selected by `PARQCEL_CONFIG_FILE`. Nonempty provider environment variables override file values. The GUI excludes API keys when saving settings.
@@ -50,9 +52,13 @@ Configuration diagnostics avoid printing credential values. Backend error messag
 
 Cell values are validated before a session commit. Rejected edits preserve data, dtype and undo/redo state. History has bounded retention and is not a backup.
 
+Pasted rows are validated as one block before insertion; one invalid field rejects the entire block. Clipboard byte and inserted-cell limits bound new content, not total process memory. Existing rows remain in their native dtypes and each insertion is one undo step, subject to the history budget.
+
 Background results apply only if the originating dataset and revision are still current. Cancellation discards callback delivery without forcibly stopping the worker. It does not undo side effects such as an in-progress file save. Shutdown waits for running tasks before cleaning temporary artifacts.
 
 Parquet exports write a sibling temporary file and replace the destination after output completes. This avoids directly truncating a destination during normal write failure. It is not a backup, access-control mechanism or guarantee against every filesystem/power-loss scenario.
+
+Optimized exports additionally reread and verify all ordered values, column names and dtypes before replacement. They reject the active source path and existing aliases, leaving the editing session unchanged. Cancellation is checked between native operations and before publication; it cannot undo a replacement already in progress. The app retains task tracking after closing the optimizer and defers opening/saving a dataset until that export finishes. Candidate counts, memory estimates and temporary-file limits are documented in [PERFORMANCE.md](PERFORMANCE.md); they are not an operating-system memory sandbox. Custom source Parquet metadata is not preserved.
 
 Dirty-state prompts help prevent accidental loss when opening another dataset or closing the editor. Save completion marks a session clean only when it acknowledges the same revision that was written.
 
@@ -63,6 +69,8 @@ Keep generated suggestions data-only. New operations need explicit argument vali
 ```bash
 python -m pytest tests/test_transformations.py tests/test_validator.py tests/test_ai_execute.py
 python -m pytest tests/test_background_tasks.py tests/test_desktop_lifecycle.py tests/test_desktop_save.py
+python -m pytest tests/test_rows.py tests/test_row_models.py tests/test_row_insertion_ui.py
+python -m pytest tests/test_parquet_optimizer.py tests/test_optimized_export.py tests/test_parquet_optimizer_dialog.py tests/test_workspace.py
 ```
 
 Review dependency changes and provider error handling. Use real event-loop tests for cancellation, widget destruction and stale completion; synchronous mocks cannot establish thread-lifecycle safety.
@@ -73,4 +81,4 @@ Use the repository's [GitHub Security Advisories](https://github.com/SMcQueen202
 
 If a credential is exposed, revoke it through the provider, replace it and review recent usage.
 
-Last updated: 2026-10-04.
+Last updated: 2026-10-06.

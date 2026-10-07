@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 from pathlib import Path
+from collections.abc import Sequence
 
 from PyQt6.QtCore import QAbstractTableModel, Qt, QModelIndex, pyqtSignal
 import polars as pl
@@ -13,6 +14,7 @@ from parqcel.core.statistics import (
 )
 from parqcel.core.session import DatasetSession
 from parqcel.core.values import is_editable_dtype
+from parqcel.core.rows import MAX_INSERT_CELLS, insert_blank_rows, insert_tsv_rows
 from models.table_presentation import TablePresentation
 
 
@@ -63,8 +65,12 @@ class PolarsTableModel(QAbstractTableModel, TablePresentation):
         self._current_data = get_page_data(frame, self._current_page, self.chunk_size)
         self._column_types = get_column_types(frame)
 
-    def _notify_commit(self, reset_page: bool = False) -> None:
+    def _notify_commit(
+        self, reset_page: bool = False, *, page: int | None = None
+    ) -> None:
         self.beginResetModel()
+        if page is not None:
+            self._current_page = page
         self._refresh_cache(reset_page)
         self.endResetModel()
         self.dataset_changed.emit()
@@ -196,6 +202,40 @@ class PolarsTableModel(QAbstractTableModel, TablePresentation):
         if old in self._column_formats:
             self._column_formats[new] = dict(self._column_formats[old])
         self._replace_data(renamed)
+
+    def insert_rows(self, position: int, count: int = 1) -> None:
+        self.commit_inserted_frame(
+            insert_blank_rows(self.get_dataframe(), position, count), position
+        )
+
+    def insert_pasted_rows(
+        self, position: int, text: str, columns: Sequence[str]
+    ) -> None:
+        self.commit_inserted_frame(
+            insert_tsv_rows(self.get_dataframe(), position, text, columns), position
+        )
+
+    def commit_inserted_frame(self, new_frame: pl.DataFrame, position: int) -> None:
+        """Commit a prepared insertion and navigate to its first row, once.
+
+        Async callers must verify the originating session and revision before
+        calling this method. Preparation uses the pure ``core.rows`` functions.
+        """
+        current = self.get_dataframe()
+        if type(position) is not int or not 0 <= position <= current.height:
+            raise ValueError(
+                "Insertion position must be between zero and the row count"
+            )
+        if (
+            not isinstance(new_frame, pl.DataFrame)
+            or new_frame.schema != current.schema
+        ):
+            raise ValueError("Inserted rows must preserve the dataset schema")
+        count = new_frame.height - current.height
+        if count <= 0 or count * current.width > MAX_INSERT_CELLS:
+            raise ValueError("Prepared insertion has an invalid number of rows")
+        self.session.commit(new_frame)
+        self._notify_commit(page=position // self.chunk_size)
 
     def get_column_statistics(self, column_name: str) -> str:
         return get_column_statistics(self.get_dataframe(), column_name)

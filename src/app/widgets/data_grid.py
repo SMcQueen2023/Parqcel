@@ -21,7 +21,7 @@ from PyQt6.QtCore import (
     QTimer,
     pyqtSlot,
 )
-from PyQt6.QtGui import QAction, QKeySequence
+from PyQt6.QtGui import QAction, QKeySequence, QPalette
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -36,6 +36,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
@@ -50,7 +51,9 @@ from PyQt6.QtWidgets import (
 
 from app.background_tasks import TaskHandle, cancel_tasks, run_in_background
 from app.preferences import settings
+from app.widgets.row_insertion_header import RowInsertionHeader
 from parqcel.core.grid import column_profile, find_match, raw_cell_text, raw_column_text
+from parqcel.core.rows import MAX_PASTE_BYTES, insert_tsv_rows
 
 MAX_COPY_CELLS = 100_000
 MAX_COPY_BYTES = 10 * 1024 * 1024
@@ -182,6 +185,10 @@ class DataGrid(QWidget):
         self._find_task: TaskHandle | None = None
         self._profile_task: TaskHandle | None = None
         self._summary_task: TaskHandle | None = None
+        self._row_task: TaskHandle | None = None
+        self._row_generation = 0
+        self._row_result_applied = False
+        self._row_insert_menu: QMenu | None = None
         self._pending_find: bool | None = None
         self._pending_profile = False
         self._pending_summary = False
@@ -239,6 +246,24 @@ class DataGrid(QWidget):
         self.table_view.setSelectionMode(QTableView.SelectionMode.ExtendedSelection)
         self.table_view.setSelectionBehavior(QTableView.SelectionBehavior.SelectItems)
         self.table_view.setWordWrap(False)
+        self.row_header = RowInsertionHeader(self.table_view, overlay_parent=self)
+        self.table_view.setVerticalHeader(self.row_header)
+        self.row_header.insertion_requested.connect(self._request_page_insertion)
+        viewport = self.table_view.viewport()
+        assert viewport is not None
+        viewport.installEventFilter(self)
+        self._row_boundary_line = QWidget(viewport)
+        self._row_boundary_line.setObjectName("rowInsertionLine")
+        self._row_boundary_line.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents
+        )
+        self._row_boundary_line.setAutoFillBackground(True)
+        self._row_boundary_line.setBackgroundRole(QPalette.ColorRole.Highlight)
+        self._row_boundary_line.hide()
+        self.row_header.boundary_changed.connect(self._show_insertion_line)
+        scrollbar = self.table_view.verticalScrollBar()
+        assert scrollbar is not None
+        scrollbar.valueChanged.connect(self.row_header.refresh_boundary)
         header = self.table_view.horizontalHeader()
         assert header is not None
         header.setSectionsMovable(True)
@@ -255,6 +280,21 @@ class DataGrid(QWidget):
         self.splitter.setStretchFactor(0, 1)
         self.splitter.setStretchFactor(1, 0)
         layout.addWidget(self.splitter, 1)
+        self.row_status = QLabel()
+        self.row_status.setObjectName("secondaryText")
+        self.row_status.setWordWrap(True)
+        self.row_status.hide()
+        self.row_cancel_button = QPushButton("Cancel insertion")
+        self.row_cancel_button.setToolTip(
+            "Discard the prepared rows; allow the active calculation to finish."
+        )
+        self.row_cancel_button.clicked.connect(self.cancel_row_insertion)
+        self.row_cancel_button.hide()
+        row_status_layout = QHBoxLayout()
+        row_status_layout.setContentsMargins(0, 0, 0, 0)
+        row_status_layout.addWidget(self.row_status, 1)
+        row_status_layout.addWidget(self.row_cancel_button)
+        layout.addLayout(row_status_layout)
         self.selection_summary = QLabel("Select cells to see a summary.")
         self.selection_summary.setObjectName("secondaryText")
         self.selection_summary.setWordWrap(True)
@@ -276,6 +316,16 @@ class DataGrid(QWidget):
         self.inspector_action.setCheckable(True)
         self.inspector_action.toggled.connect(self._toggle_inspector)
         self.rename_action = self._action("Rename column…", self.show_rename)
+        self.add_row_action = self._action("Add row…", self._request_default_insertion)
+        self.add_row_action.setToolTip(
+            "Insert before the selected row, or at the dataset end when no row is selected."
+        )
+        self.paste_rows_action = self._action(
+            "Paste as new rows", self.paste_rows, "Ctrl+Shift+V"
+        )
+        self.paste_rows_action.setToolTip(
+            "Insert clipboard rows before the selected row, starting at the first visible column. No header row is skipped."
+        )
         self.find_input.returnPressed.connect(lambda: self.start_find())
         self.find_input.textChanged.connect(self._invalidate_find)
         self.find_column.currentIndexChanged.connect(self._invalidate_find)
@@ -476,6 +526,15 @@ class DataGrid(QWidget):
             bool(names) and hasattr(self._model, "rename_column")
         )
         self.profile_button.setEnabled(bool(names))
+        can_insert = self._can_insert_rows()
+        self.add_row_action.setEnabled(can_insert)
+        self.paste_rows_action.setEnabled(can_insert)
+        self.row_header.set_insertion_enabled(can_insert, self._row_offset())
+        row_running = self._row_task is not None and self._row_task.is_running
+        self.row_cancel_button.setVisible(row_running and not self._closing)
+        self.row_cancel_button.setEnabled(
+            row_running and self._row_task is not None and not self._row_task.cancelled
+        )
 
     def _invalidate_find(self, *args) -> None:
         self._find_generation += 1
@@ -493,10 +552,216 @@ class DataGrid(QWidget):
         self._profile_generation += 1
         self._pending_summary = False
         self._pending_profile = False
+        self._row_generation += 1
+        if self._row_insert_menu is not None:
+            self._row_insert_menu.close()
+        self.row_header.hide_boundary()
+        if self._row_task is not None and self._row_task.is_running:
+            self.row_status.setText(
+                "Row insertion cancelled; waiting for work to finish."
+            )
         self._summary_timer.stop()
         cancel_tasks(self)
         self.profile_tree.clear()
         self.profile_status.setText(f"Profile scope: {self._scope_label}")
+
+    def _can_insert_rows(self) -> bool:
+        return (
+            not self._closing
+            and bool(self._column_names())
+            and hasattr(self._model, "insert_rows")
+            and hasattr(self._model, "commit_inserted_frame")
+            and (self._row_task is None or not self._row_task.is_running)
+        )
+
+    def _show_insertion_line(self, y: int | None) -> None:
+        viewport = self.table_view.viewport()
+        if y is None or viewport is None:
+            self._row_boundary_line.hide()
+            return
+        self._row_boundary_line.setGeometry(
+            0, min(max(0, y - 1), max(0, viewport.height() - 2)), viewport.width(), 2
+        )
+        self._row_boundary_line.show()
+        self._row_boundary_line.raise_()
+
+    def _default_insertion_position(self) -> int:
+        index = self.table_view.currentIndex()
+        if index.isValid():
+            return self._row_offset() + index.row()
+        return self._dataset_frame().height
+
+    def _request_default_insertion(self) -> None:
+        if self._can_insert_rows():
+            self.request_row_insertion(self._default_insertion_position())
+
+    def _request_page_insertion(self, boundary: int) -> None:
+        self.request_row_insertion(self._row_offset() + boundary)
+
+    def request_row_insertion(self, position: int) -> None:
+        """Open row actions at an explicit zero-based boundary in the dataset."""
+        if not self._can_insert_rows():
+            return
+        height = self._dataset_frame().height
+        if not 0 <= position <= height:
+            return
+        if self._row_insert_menu is not None:
+            self._row_insert_menu.close()
+            self._row_insert_menu.deleteLater()
+        menu = QMenu(self)
+        self._row_insert_menu = menu
+        placement = (
+            f"Before row {position + 1:,}"
+            if position < height
+            else (f"After row {height:,}" if height else "First row")
+        )
+        menu.addSection(placement)
+        blank = menu.addAction("Insert blank row")
+        paste = menu.addAction("Paste clipboard as new rows")
+        assert blank is not None and paste is not None
+        signature = self._signature()
+        blank.triggered.connect(
+            lambda: (
+                self.insert_blank_row(position)
+                if signature == self._signature()
+                else None
+            )
+        )
+        paste.triggered.connect(
+            lambda: (
+                self.paste_rows(position) if signature == self._signature() else None
+            )
+        )
+        if self.row_header.boundary is not None:
+            point = self.row_header.insertion_menu_position()
+        else:
+            viewport = self.table_view.viewport()
+            assert viewport is not None
+            index = self.table_view.currentIndex()
+            point = viewport.mapToGlobal(
+                self.table_view.visualRect(index).topLeft()
+                if index.isValid()
+                else viewport.rect().topLeft()
+            )
+        menu.popup(point)
+
+    def _select_inserted_row(self, position: int) -> None:
+        self._model.jump_to_page(position // self._model.chunk_size)
+        local_row = position % self._model.chunk_size
+        columns = self._visual_columns()
+        if not columns:
+            return
+        column = next(
+            (
+                column
+                for column in columns
+                if self._model.flags(self._model.index(local_row, column))
+                & Qt.ItemFlag.ItemIsEditable
+            ),
+            columns[0],
+        )
+        self._select_match(position, column)
+        self.table_view.setFocus()
+
+    def insert_blank_row(self, position: int | None = None) -> bool:
+        if not self._can_insert_rows():
+            return False
+        position = self._default_insertion_position() if position is None else position
+        try:
+            self._model.insert_rows(position, count=1)
+            self._select_inserted_row(position)
+        except (ValueError, pl.exceptions.PolarsError) as exc:
+            QMessageBox.warning(self, "Insert row", str(exc))
+            return False
+        self.row_status.setText(f"Inserted one blank row at row {position + 1:,}.")
+        self.row_status.show()
+        return True
+
+    def paste_rows(self, position: int | None = None) -> bool:
+        """Insert typed TSV rows; the first field maps to the first visible column."""
+        if not self._can_insert_rows():
+            return False
+        position = self._default_insertion_position() if position is None else position
+        clipboard = QApplication.clipboard()
+        assert clipboard is not None
+        text = clipboard.text()
+        if not text:
+            QMessageBox.warning(self, "Paste rows", "The clipboard has no text rows.")
+            return False
+        if len(text) > MAX_PASTE_BYTES or len(text.encode("utf-8")) > MAX_PASTE_BYTES:
+            QMessageBox.warning(
+                self, "Paste rows", "Clipboard text exceeds 10 MiB. Paste fewer rows."
+            )
+            return False
+        model = self._model
+        frame = self._dataset_frame()
+        if not 0 <= position <= frame.height:
+            QMessageBox.warning(
+                self, "Paste rows", "The insertion row is out of range."
+            )
+            return False
+        names = self._column_names()
+        columns = [names[column] for column in self._visual_columns()]
+        self._row_generation += 1
+        generation, signature = self._row_generation, self._signature()
+        self._row_result_applied = False
+        self.row_status.setText(f"Preparing clipboard rows at row {position + 1:,}…")
+        self.row_status.show()
+
+        def completed(inserted: pl.DataFrame) -> None:
+            if (
+                self._closing
+                or generation != self._row_generation
+                or signature != self._signature()
+            ):
+                return
+            count = inserted.height - frame.height
+            model.commit_inserted_frame(inserted, position)
+            self._select_inserted_row(position)
+            self._row_result_applied = True
+            self.row_status.setText(
+                f"Inserted {count:,} clipboard rows at row {position + 1:,}. Undo restores the previous data."
+            )
+
+        def failed(exc: Exception) -> None:
+            if (
+                not self._closing
+                and generation == self._row_generation
+                and signature == self._signature()
+            ):
+                self.row_status.setText("No rows inserted.")
+                QMessageBox.warning(self, "Paste rows", str(exc))
+
+        self._row_task = run_in_background(
+            self,
+            lambda: insert_tsv_rows(frame, position, text, columns),
+            completed,
+            failed,
+        )
+        self._row_task.finished.connect(self._row_task_finished)
+        self._update_actions()
+        return True
+
+    @pyqtSlot()
+    def _row_task_finished(self) -> None:
+        if (
+            not self._closing
+            and self._row_task is not None
+            and self._row_task.cancelled
+            and not self._row_result_applied
+        ):
+            self.row_status.setText("Row insertion cancelled. No rows inserted.")
+        self._update_actions()
+
+    def cancel_row_insertion(self) -> None:
+        """Discard the pending paste without cancelling other grid operations."""
+        if self._row_task is not None and self._row_task.is_running:
+            self._row_generation += 1
+            self._row_task.cancel()
+            self.row_status.setText(
+                "Row insertion cancelled; waiting for work to finish."
+            )
+            self._update_actions()
 
     def _selected_cells(self, limit: int) -> list[tuple[int, int]]:
         selection = self.table_view.selectionModel()
@@ -1060,6 +1325,12 @@ class DataGrid(QWidget):
             self._settings.setValue(self._settings_key(), json.dumps(self._view_state))
 
     def eventFilter(self, watched, event) -> bool:
+        if (
+            watched is self.table_view.viewport()
+            and event.type() == QEvent.Type.Resize
+            and hasattr(self, "row_header")
+        ):
+            self.row_header.refresh_boundary()
         if event.type() == QEvent.Type.Close:
             self.save_view_state()
         return super().eventFilter(watched, event)
@@ -1067,6 +1338,7 @@ class DataGrid(QWidget):
     def cancel_pending_work(self) -> None:
         """Cancel queued summaries as well as already submitted grid tasks."""
         self._invalidate_all()
+        self._update_actions()
         self.selection_summary.setText("Selection summary cancelled.")
 
     def prepare_close(self) -> None:

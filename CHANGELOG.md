@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Row-boundary insertion controls and an Add row menu in the editor, with blank-row insertion and clipboard paste as new rows.
+- Atomic typed TSV row insertion with one-step undo/redo, pagination updates, explicit clipboard limits and stale-result protection.
+- Parquet export optimizer with sampled sort-order comparisons, verified full-size finalists, a preferred sort column and original-order fallback.
+- Separate optimized-copy export with exact schema/value verification, source-file protection, resource checks and cooperative cancellation.
+
+### Fixed
+
+- Centered row-insertion plus glyphs independently of font size and display scaling.
+
 ## [0.2.0] - 2026-10-05
 
 ### Added

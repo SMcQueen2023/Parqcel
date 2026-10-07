@@ -5,7 +5,7 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-Parqcel is a desktop Parquet viewer and editor built with PyQt6 and Polars. It supports CSV import, filtering, sorting, column statistics and typed cell editing. Optional packages add feature engineering, PCA/UMAP and an AI assistant.
+Parqcel is a desktop Parquet viewer and editor built with PyQt6 and Polars. It supports CSV import, filtering, sorting, column statistics, typed cell editing, row insertion and measured Parquet export optimization. Optional packages add feature engineering, PCA/UMAP and an AI assistant.
 
 Use **File → Preview Parquet...** to inspect a file through read-only lazy pages. Use **File → Open for editing...** to load a complete dataset for editing. Preview and editable pagination have different memory requirements; see [PERFORMANCE.md](PERFORMANCE.md).
 
@@ -24,7 +24,7 @@ Parqcel includes optional Phase 1 deployment scaffolding for Google Cloud Platfo
 
 1. Preview a Parquet file, or open it in the editor. CSV import offers **Strings (preserve text)** or **Infer numbers and other types**; strings are the default.
 2. Navigate pages and right-click a column header to sort, filter, rename, format, convert its type or request statistics. **View → Columns** searches and shows/hides columns; drag headers to rearrange the view.
-3. Edit supported scalar cells, add columns or drop columns. Invalid edits leave the dataset and history unchanged. Complex column types remain read-only.
+3. Edit supported scalar cells, insert blank rows or paste new rows, and add or drop columns. Invalid edits leave the dataset and history unchanged. Complex column types remain read-only.
 4. Use Undo/Redo buttons or the platform's standard keyboard shortcuts. History is bounded; an operation may exceed the retained history budget.
 5. Use **Save** to update an existing Parquet file, **Save As...** for a new Parquet destination, or **Export CSV...** for a CSV snapshot. Writes use a temporary sibling file and replace the destination after successful output. CSV export leaves the Parquet saved/unsaved state unchanged.
 
@@ -37,9 +37,21 @@ Parqcel includes optional Phase 1 deployment scaffolding for Google Cloud Platfo
 - **Ctrl+F** finds literal values with case and column options, and **Ctrl+G** jumps to a row. Editor searches cover the complete loaded dataset; preview searches cover only the displayed page. Search uses raw values, independently of display formatting.
 - **Inspector** shows the schema and selected cell. Request a column profile to calculate statistics in the background: the loaded dataset in the editor, or the current page in preview. Exact distinct counts can require substantial work on high-cardinality columns.
 - Column widths, visibility, order and display formats are remembered by file path. These preferences do not modify the file or add undo history. Column renaming is an editable dataset operation and can be undone.
+- In the editor, hover over a row-number boundary to reveal a boxed **+** on the border between rows. Its insertion line identifies the exact position, including before the first row and after the last row. Choose **Insert blank row** or **Paste clipboard as new rows**. **Add row** in the toolbar/Edit menu provides the same commands before the current row, or at the end of the dataset when no row is current.
+- **Paste as new rows** (**Ctrl+Shift+V**) reads tab-separated clipboard cells in visible column order, starting with the first visible column. It inserts new rows without overwriting existing cells. The first clipboard row is treated as data, not guessed to be a header. Omitted columns become null; blank fields stay empty in string columns and become null in other supported columns. Invalid typed values reject the entire paste. Each insertion is one undo step, subject to the history budget. Clipboard input is limited to 10 MiB and inserted rows to 100,000 total dataset cells, including omitted columns. The existing typed editor rejects pasted temporal values beyond six fractional-second digits; existing nanosecond values remain intact. Normal **Ctrl+V** within a cell editor still pastes text into that cell.
 - The start screen and File menu list recent files. Dropping a Parquet file opens read-only preview; dropping a CSV file starts the editor's import workflow.
 
-**Help → About Parqcel** reports the application version. Package and installer versions are **0.2.0** for this workspace release.
+**Help → About Parqcel** reports the application version. Package and installer version declarations are currently **0.2.0**. Row insertion and Parquet export optimization are unreleased checkout changes; the previous 0.2.0 installer does not include them. See [CHANGELOG.md](CHANGELOG.md) and the [Windows release checklist](installer/windows_release_checklist.md) when preparing a new version.
+
+### Optimize Parquet export
+
+Open a dataset for editing, then choose **Analysis → Optimize Parquet export...**. Optionally choose a preferred sort column, such as a date or a column you frequently filter on, and click **Analyze**. The comparison measures actual file sizes for a bounded set of sort orders, then fully measures and verifies the original order and the two best sample candidates. The smallest tested full output is selected; the original order wins ties.
+
+Select a fully measured result and choose **Export selected…** to create a new Parquet copy. The export sorts whole rows stably and verifies column order, dtypes and every value before publishing the file. It leaves the editor, source file, undo history and saved/unsaved state unchanged. The active source cannot be used as the export destination.
+
+Savings compare against an original-order rewrite with identical settings: Zstandard level 3, statistics enabled, 131,072-row groups and 1 MiB pages. They do not compare against the existing source file, whose encoding may differ. This search finds the smallest tested candidate, not a guaranteed global optimum. Smaller files do not necessarily make every query faster.
+
+Analysis uses up to 20,000 sampled rows and 12 candidate orders, with a 512 MiB estimate for additional working memory and a 1 GiB temporary-file limit. The dataset must already fit in the editor; larger optimization jobs can be rejected by the resource checks. Memory checks are estimates, not a cap on native allocations. Cancel stops between native operations; closing the app waits for work to finish. Output preserves supported dataset values and schema, but does not retain custom source-file metadata. See [PERFORMANCE.md](PERFORMANCE.md) for details.
 
 The title marks unsaved changes. Opening another file or closing the window offers Save, Discard and Cancel. Undoing back to the saved state clears the unsaved marker.
 

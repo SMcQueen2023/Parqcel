@@ -30,6 +30,7 @@ from app.icons import line_icon
 from app.preferences import settings
 from app.theme import apply_theme, theme_mode
 from app.widgets.data_grid import DataGrid
+from app.widgets.parquet_optimizer_dialog import ParquetOptimizerDialog
 from parqcel import __version__
 from app.widgets.filter_dialog import apply_filter
 from models.polars_table_model import PolarsTableModel  # Import the model class
@@ -66,6 +67,7 @@ class MainWindow(QMainWindow):
         self._statistics_cache = {}
         self._save_task = None
         self._export_task = None
+        self._optimizer_export_tasks = set()
         self.temp_files = TempFileManager()
         self.grid = DataGrid(self)
         self.table_view = self.grid.table_view
@@ -172,6 +174,8 @@ class MainWindow(QMainWindow):
         self.toolbar.setMovable(False)
         self.toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.addToolBar(self.toolbar)
+        self.preview_action.setIconText("Preview")
+        self.open_action.setIconText("Open")
         icons = {
             self.open_action: "open",
             self.preview_action: "preview",
@@ -179,6 +183,8 @@ class MainWindow(QMainWindow):
             self.undo_action: "undo",
             self.redo_action: "redo",
             self.grid.copy_action: "copy",
+            self.grid.add_row_action: "add",
+            self.grid.paste_rows_action: "paste",
             self.grid.find_action: "find",
             self.grid.columns_action: "columns",
             self.grid.inspector_action: "inspector",
@@ -194,6 +200,7 @@ class MainWindow(QMainWindow):
         self.redo_button = self.toolbar.widgetForAction(self.redo_action)
         self.toolbar.addSeparator()
         for action in (
+            self.grid.add_row_action,
             self.grid.copy_action,
             self.grid.find_action,
             self.grid.columns_action,
@@ -321,6 +328,7 @@ class MainWindow(QMainWindow):
 
     def _update_file_actions(self):
         loaded = self.model is not None and not self._closing
+        self.optimize_action.setEnabled(loaded)
         busy = self._save_task is not None and self._save_task.is_running
         self.save_action.setEnabled(loaded and not busy)
         self.save_as_action.setEnabled(loaded and not busy)
@@ -399,6 +407,8 @@ class MainWindow(QMainWindow):
         for action in (
             self.grid.copy_action,
             self.grid.copy_headers_action,
+            self.grid.add_row_action,
+            self.grid.paste_rows_action,
             self.grid.find_action,
             self.grid.go_to_action,
             self.grid.rename_action,
@@ -441,6 +451,9 @@ class MainWindow(QMainWindow):
         # Analysis menu
         analysis_menu = menu_bar.addMenu("Analysis")
         analysis_menu.addAction(stats_action)
+        self.optimize_action = QAction("Optimize Parquet export...", self)
+        self.optimize_action.triggered.connect(self.open_parquet_optimizer)
+        analysis_menu.addAction(self.optimize_action)
         self.featurize_action = QAction("Featurize Columns...", self)
         self.featurize_action.triggered.connect(self.handle_featurize)
         analysis_menu.addAction(self.featurize_action)
@@ -516,6 +529,9 @@ class MainWindow(QMainWindow):
 
     def load_file(self, file_path, *, csv_types="strings"):
         """Load a selected file; an intervening edit invalidates the result."""
+        if self._optimizer_export_busy():
+            return None
+        self._invalidate_optimizers("Another dataset is being opened.")
         self._load_generation += 1
         generation = self._load_generation
         previous = self.model
@@ -541,6 +557,9 @@ class MainWindow(QMainWindow):
         )
 
     def set_model(self, model):
+        if self._optimizer_export_busy():
+            return
+        self._invalidate_optimizers("The active dataset changed.")
         if self.model is not None:
             try:
                 self.model.dataset_changed.disconnect(self._dataset_changed)
@@ -636,7 +655,52 @@ class MainWindow(QMainWindow):
 
         return self._run_task(label, lambda: operation(snapshot), apply)
 
+    def open_parquet_optimizer(self, checked=False):
+        if self.model is None or self._closing:
+            return None
+        for dialog in self.findChildren(ParquetOptimizerDialog):
+            if dialog.isVisible() and not dialog._closing:
+                dialog.raise_()
+                dialog.activateWindow()
+                return dialog
+        if has_active_tasks(self):
+            self.statusBar().showMessage(
+                "Wait for active work to finish before optimizing Parquet.", 5000
+            )
+            return None
+        dialog = ParquetOptimizerDialog(
+            self.model,
+            parent=self,
+            current_model=lambda: self.model,
+            source_path=self.model.session.source_path,
+        )
+        dialog.export_started.connect(self._track_optimizer_export)
+        dialog.show()
+        return dialog
+
+    def _track_optimizer_export(self, task):
+        # Retain this state after the dialog closes: a native writer may still
+        # be finishing, or may have crossed its final cancellation check.
+        pending = self._optimizer_export_tasks
+        pending.add(task)
+        task.finished.connect(lambda: pending.discard(task))
+
+    def _optimizer_export_busy(self):
+        if any(task.is_running for task in self._optimizer_export_tasks):
+            self.statusBar().showMessage(
+                "Wait for the optimized export to finish before opening or saving a dataset.",
+                5000,
+            )
+            return True
+        return False
+
+    def _invalidate_optimizers(self, reason):
+        for dialog in self.findChildren(ParquetOptimizerDialog):
+            dialog.invalidate(reason)
+
     def cancel_work(self):
+        for dialog in self.findChildren(ParquetOptimizerDialog):
+            dialog.cancel_work()
         for grid in self.findChildren(DataGrid):
             grid.cancel_pending_work()
         cancel_tasks(self)
@@ -691,6 +755,8 @@ class MainWindow(QMainWindow):
         return self.save_parquet(on_saved=on_saved)
 
     def _saving_busy(self):
+        if self._optimizer_export_busy():
+            return True
         if self._save_task is not None and self._save_task.is_running:
             self.statusBar().showMessage(
                 "A save is already running. Wait for it to finish before saving again.",
@@ -700,6 +766,8 @@ class MainWindow(QMainWindow):
         return False
 
     def _save_to(self, file_name, *, on_saved=None):
+        if self._optimizer_export_busy():
+            return None
         model = self.model
         revision = model.session.revision
         snapshot = model.get_dataframe()
@@ -707,6 +775,10 @@ class MainWindow(QMainWindow):
         def saved(_):
             if self.model is not model:
                 return
+            if model.session.revision == revision and model.session.source_path != str(
+                file_name
+            ):
+                self._invalidate_optimizers("The active dataset's file path changed.")
             if model.session.mark_saved(revision, file_name):
                 self._dataset_changed()
                 self.grid.set_identity(str(file_name))
@@ -1255,6 +1327,8 @@ class MainWindow(QMainWindow):
             )
 
     def _begin_close(self):
+        for dialog in self.findChildren(ParquetOptimizerDialog):
+            dialog.prepare_close()
         for grid in self.findChildren(DataGrid):
             grid.prepare_close()
         self._closing = True

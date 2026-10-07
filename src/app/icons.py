@@ -17,7 +17,7 @@ from PyQt6.QtGui import (
 from PyQt6.QtWidgets import QApplication
 
 _NAMES = frozenset(
-    "open preview save undo redo copy find columns inspector first previous next last".split()
+    "open preview save undo redo copy add paste find columns inspector first previous next last".split()
 )
 
 
@@ -55,6 +55,15 @@ def _geometry(name: str) -> QPainterPath:
     elif name == "copy":
         line((6, 13), (3, 13), (3, 3), (13, 3), (13, 6))
         path.addRoundedRect(QRectF(7, 7, 10, 10), 1, 1)
+    elif name == "add":
+        path.addRoundedRect(QRectF(3, 3, 14, 14), 1, 1)
+        line((6, 10), (14, 10))
+        line((10, 6), (10, 14))
+    elif name == "paste":
+        line((6, 4), (3, 4), (3, 17), (17, 17), (17, 4), (14, 4))
+        path.addRoundedRect(QRectF(6, 2, 8, 4), 1, 1)
+        line((6, 10), (14, 10))
+        line((6, 13), (14, 13))
     elif name == "find":
         path.addEllipse(QRectF(3, 3, 10, 10))
         line((12, 12), (17, 17))

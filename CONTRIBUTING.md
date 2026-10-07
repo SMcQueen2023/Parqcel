@@ -29,6 +29,8 @@ Keep external AI requests mocked in automated tests. Qt tests default to `QT_QPA
 - Check dataset identity and revision before applying asynchronous results. Retain workers until natural completion; cancellation must not destroy a running thread.
 - Keep assistant suggestions declarative. Add explicitly validated plan operations rather than generated-Python execution.
 - Preserve the distinction between read-only lazy preview and fully materialized editing. Measure before claiming memory bounds.
+- Row insertion must validate the complete typed block before one session commit, retaining existing row values and column dtypes. Cover page boundaries, visible clipboard column order, rejection and undo.
+- Parquet optimization compares actual bytes with identical writer settings. Recommendations and exports require full-data verification; keep the original order on size ties. Export a separate copy without committing editor changes, and retain export-task tracking after the dialog closes so source changes wait for publication to finish.
 
 Test the behavior at the relevant boundary: strict edit rejection, history retention, saved-state transitions, failed output, stale work, real widget destruction and packaged imports. Do not replace all asynchronous tests with synchronous callback mocks.
 
@@ -53,7 +55,7 @@ python -m build --wheel
 python -I scripts/smoke_installed.py
 ```
 
-The smoke script checks installed desktop/CLI imports, packaged resources, session undo and Parquet I/O. Tests in the checkout add `src` to the import path, so they do not replace this packaging check.
+The smoke script checks installed desktop/CLI imports, packaged resources, typed row insertion and undo, Parquet I/O, and asynchronous optimizer analysis and verified export. It checks that optimization leaves editor order and saved state unchanged. Tests in the checkout add `src` to the import path, so they do not replace this packaging check.
 
 The CI configuration runs base tests on Python 3.11 and ML tests on 3.13 across Windows and Linux. Separate jobs check Ruff, Black and mypy, then build and smoke-test the Windows base standalone application and installer. Treat actual workflow results as the evidence that these environments passed.
 

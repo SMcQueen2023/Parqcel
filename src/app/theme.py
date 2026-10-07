@@ -117,6 +117,10 @@ def _stylesheet(t: dict[str, str]) -> str:
             background: {t['selected']}; color: {t['selected_text']}; }}
         QToolButton:focus, QPushButton:focus {{ border: 1px solid {t['accent']}; }}
         QToolButton:disabled, QPushButton:disabled {{ color: {t['disabled']}; }}
+        QToolButton#rowInsertButton {{ background: {t['surface']}; color: {t['accent']};
+            border: 1px solid {t['accent']}; border-radius: 3px; padding: 0; }}
+        QToolButton#rowInsertButton:hover {{ background: {t['selected']};
+            color: {t['selected_text']}; }}
         QPushButton#primaryButton {{ background: {t['accent']}; color: {t['accent_text']};
             border-color: {t['accent']}; }}
         QPushButton#primaryButton:disabled {{ background: {t['chrome']};

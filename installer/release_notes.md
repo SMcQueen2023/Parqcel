@@ -1,5 +1,7 @@
 # Parqcel v0.2.0 — Spreadsheet workspace and Parquet analysis
 
+These notes describe the previous v0.2.0 installer built from commit `8e154a0`. The newer row-boundary insertion controls, clipboard paste as new rows, centered plus glyph and Parquet export optimizer are **unreleased** changes and are not included in that artifact. Their release-note source is [CHANGELOG.md — Unreleased](../CHANGELOG.md#unreleased), with usage in the [README](../README.md#desktop-workflow). Before using this file for another release, update the version, features, validation and exact installer provenance to match its new build.
+
 Parqcel 0.2.0 adds a shared spreadsheet workspace for editable datasets and read-only Parquet previews, with System, Light and Dark themes.
 
 ## What's new

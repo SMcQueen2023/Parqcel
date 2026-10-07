@@ -14,8 +14,18 @@ from PyQt6.QtWidgets import QApplication  # noqa: E402
 import polars as pl  # noqa: E402
 from app.main_window import MainWindow  # noqa: E402
 from app.theme import apply_theme  # noqa: E402
+from app.background_tasks import has_active_tasks  # noqa: E402
 from models.polars_table_model import PolarsTableModel  # noqa: E402
 from parqcel.core.io import read_dataset, write_dataset_atomic  # noqa: E402
+
+
+def _wait_for(app, predicate, *, timeout=10):
+    deadline = time.monotonic() + timeout
+    while not predicate():
+        if time.monotonic() >= deadline:
+            raise RuntimeError("Desktop smoke operation timed out")
+        app.processEvents()
+        time.sleep(0.005)
 
 
 def _run_smoke():
@@ -30,6 +40,11 @@ def _run_smoke():
     window.table_view.setCurrentIndex(window.model.index(0, 0))
     assert window.grid.copy_selection()
     assert app.clipboard().text() == "2\n"
+    window.model.insert_pasted_rows(1, "3\n4\n", ["a"])
+    assert window.model.get_dataframe()["a"].to_list() == [2, 3, 4, 1]
+    window.undo()
+    assert window.model.get_dataframe()["a"].to_list() == [2, 1]
+    assert not window.model.session.dirty
     apply_theme(app, "light")
     assert (
         importlib.resources.files("parqcel.assets")
@@ -41,18 +56,25 @@ def _run_smoke():
         path = Path(directory) / "roundtrip.parquet"
         write_dataset_atomic(window.model.get_dataframe(), path)
         assert read_dataset(path).height == 2
+        optimizer = window.open_parquet_optimizer()
+        assert optimizer.analyze()
+        _wait_for(app, lambda: not has_active_tasks(window))
+        assert optimizer.export_button.isEnabled()
+        output = Path(directory) / "optimized.parquet"
+        assert optimizer.export_selected(output)
+        _wait_for(app, lambda: not has_active_tasks(window))
+        assert sorted(read_dataset(output)["a"].to_list()) == [1, 2]
+        assert window.model.get_dataframe()["a"].to_list() == [2, 1]
+        assert not window.model.session.dirty
+        optimizer.close()
         subprocess.run(
             [sys.executable, "-I", "-m", "parqcel.cli", "--help"],
             cwd=directory,
             check=True,
         )
     window.close()
-    deadline = time.monotonic() + 5
-    while not window._close_ready:
-        if time.monotonic() >= deadline:
-            raise RuntimeError("Desktop shutdown timed out")
-        app.processEvents()
-    print("Installed wheel desktop, CLI, resources and Parquet I/O passed.")
+    _wait_for(app, lambda: window._close_ready, timeout=5)
+    print("Installed wheel desktop, optimizer, CLI, resources and Parquet I/O passed.")
 
 
 def main():

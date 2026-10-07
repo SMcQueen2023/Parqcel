@@ -1,9 +1,10 @@
 import pytest
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont, QPalette
+from PyQt6.QtGui import QFont, QImage, QPainter, QPalette
 
 from app import theme
 from app.preferences import settings
+from app.widgets.row_insertion_header import RowInsertButton
 
 
 @pytest.fixture
@@ -96,3 +97,39 @@ def test_invalid_mode_does_not_change_saved_preference(appearance):
     settings().setValue("appearance/theme", "invalid")
     theme.setup_theme(appearance)
     assert theme.theme_mode() == "system"
+
+
+@pytest.mark.parametrize("mode", ["light", "dark"])
+@pytest.mark.parametrize("scale", [1.0, 1.5, 2.0])
+def test_row_plus_ink_is_centered_in_its_box_at_different_scales(
+    appearance, qtbot, mode, scale
+):
+    theme.apply_theme(appearance, mode)
+    button = RowInsertButton()
+    button.setObjectName("rowInsertButton")
+    button.setText("+")
+    button.setFixedSize(20, 20)
+    qtbot.addWidget(button)
+    button.show()
+    for points in (8, 24):
+        font = QFont(button.font())
+        font.setPointSize(points)
+        button.setFont(font)
+        image = QImage(int(20 * scale), int(20 * scale), QImage.Format.Format_ARGB32)
+        image.setDevicePixelRatio(scale)
+        image.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(image)
+        button.render(painter)
+        painter.end()
+        background = image.pixelColor(int(3 * scale), int(3 * scale))
+        ink = [
+            (x, y)
+            for y in range(int(3 * scale), int(17 * scale))
+            for x in range(int(3 * scale), int(17 * scale))
+            if _contrast(image.pixelColor(x, y), background) > 1.5
+        ]
+        assert ink
+        for axis in (0, 1):
+            positions = [point[axis] for point in ink]
+            ink_center = (min(positions) + max(positions) + 1) / 2
+            assert abs(ink_center - image.width() / 2) <= 0.5
