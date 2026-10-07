@@ -1,8 +1,7 @@
 name: Deploy to GCP
 
 on:
-  push:
-    branches: [main, master]
+  # Optional cloud scaffolding; desktop pushes must not deploy to GCP.
   workflow_dispatch:
 
 permissions:

@@ -11,7 +11,7 @@ Use **File → Preview Parquet...** to inspect a file through read-only lazy pag
 
 ## ☁️ Cloud-Native GCP (Phase 1)
 
-Parqcel now includes Phase 1 cloud-native deployment scaffolding for Google Cloud Platform with CI/CD.
+Parqcel includes optional Phase 1 deployment scaffolding for Google Cloud Platform. The desktop app and Windows installer do not require GCP. Cloud deployment is manual-only and requires the configuration described in the rollout guide.
 
 - Architecture and rollout guide: [docs/gcp-phase1-cloud-native.md](docs/gcp-phase1-cloud-native.md)
 - GitHub Actions deployment workflow: [.github/workflows/gcp-deploy.yml](.github/workflows/gcp-deploy.yml)

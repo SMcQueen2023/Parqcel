@@ -2,6 +2,8 @@
 
 This document defines a practical first implementation phase for running Parqcel workloads in GCP with repeatable CI/CD.
 
+This is optional cloud scaffolding. The desktop app, its tests and Windows releases do not require GCP. The deployment workflow runs only when explicitly started with **Run workflow**; pushes to `main` or `master` do not deploy cloud resources.
+
 ## Scope
 
 Phase 1 focuses on:
@@ -60,12 +62,13 @@ GitHub Actions workflow expects:
 
 ## Deployment Flow
 
-1. Push to `main`.
-2. GitHub Actions authenticates to GCP via Workload Identity Federation.
-3. Cloud Build builds and pushes API image.
-4. Cloud Build deploys API Cloud Run service.
-5. Cloud Build builds and pushes worker image.
-6. Cloud Build creates/updates worker Cloud Run Job.
+1. Complete the platform bootstrap and configure the required secrets and variables above.
+2. Open **Actions → Deploy to GCP → Run workflow** and choose the branch to deploy.
+3. GitHub Actions authenticates to GCP via Workload Identity Federation.
+4. Cloud Build builds and pushes API image.
+5. Cloud Build deploys API Cloud Run service.
+6. Cloud Build builds and pushes worker image.
+7. Cloud Build creates/updates worker Cloud Run Job.
 
 ## Recommended Next Steps After Phase 1
 

@@ -1,33 +1,36 @@
-Parqcel 0.2.0 — Spreadsheet workspace and Parquet analysis tools
+# Parqcel v0.2.0 — Spreadsheet workspace and Parquet analysis
 
-This release adds a shared light/dark desktop workspace for editable datasets and read-only lazy Parquet previews.
+Parqcel 0.2.0 adds a shared spreadsheet workspace for editable datasets and read-only Parquet previews, with System, Light and Dark themes.
 
-Highlights:
+## What's new
 
-- System, Light and Dark themes, a compact action toolbar, recent files and drag-and-drop preview.
-- Clipboard copy with headers, column visibility/reordering/renaming, and view-only display formatting.
-- Selection summaries, Find/Go To and a scoped column inspector with background profiling.
-- Separate Save and Save As actions plus atomic CSV export; export does not clear unsaved Parquet edits.
-- Selection-preserving cell edits and consistent one-based row labels.
-- The About dialog, Python package and Windows installer identify this build as version 0.2.0.
+- A compact toolbar, recent files and drag-and-drop Parquet preview.
+- Read-only lazy Parquet pages with schema and row counts, without loading the entire dataset into the editor.
+- Copy selections with optional headers; hide, reorder, resize, auto-fit and rename columns.
+- View-only number, percentage, scientific and date formatting that preserves the underlying values.
+- Selection summaries, Find, Go To and an inspector for exact cell values, schema and background column profiles.
+- Separate Save and Save As actions, plus atomic CSV export that preserves the editing session's unsaved state.
+- An About dialog identifying the app as version 0.2.0.
 
-- Windows packaging: refreshed standalone bundle and installer outputs for both the `base` and `ml` desktop profiles.
-- Responsiveness: featurization, dimensionality reduction, AI assistant requests, and AI backend connection tests now run off the UI thread.
-- Data editing reliability: dropped-column operations now participate correctly in undo/redo.
-- AI safety and docs: stricter malformed-response handling plus README guidance that matches the current assistant scope.
-- Tests: focused pytest coverage added for undo/redo regressions, async UI helpers, backend parsing, and AI settings workflows.
+## Reliability improvements
 
-Important notes:
+- Typed cell validation preserves data and history when an edit is invalid.
+- Cell edits preserve grid selection; sorting and column changes participate in bounded undo/redo history.
+- Background operations use revision checks and discard stale results. Repeated searches, profiles and preview page requests are coalesced to limit concurrent work.
+- Unsaved-change prompts, atomic snapshot saves and coordinated shutdown protect editing workflows.
+- AI-assisted transformations use validated declarative plans instead of executing generated Python.
 
-- The installer no longer depends on Python being installed on the target machine.
-- The packaged feature set is determined by the desktop build profile. Use the default `base` profile for viewer/editor only, or build with the `ml` profile after installing `.[ml]` to ship ML tooling.
-- Advanced AI dependencies remain better suited to the Python install path because they are large and environment-sensitive.
+## Windows download and upgrade
 
-How to test the installer locally:
+Download **Parqcel-Installer.exe** from this release's assets. This is the **base** desktop build for Parquet viewing/editing and CSV import/export. Python does not need to be installed separately.
 
-1) Build the desktop bundle with `scripts\build_windows_desktop.ps1`.
-2) Compile `installer\parqcel.iss` with Inno Setup, or pass `-Installer` to the build script.
-3) Run the generated `installer\dist\Parqcel-Installer.exe` on a test machine.
-4) Launch Parqcel from Start Menu or the Desktop shortcut.
+To upgrade, close Parqcel, run the installer and choose the same application folder as your existing installation. Launch the app and verify **Help → About Parqcel** reports **0.2.0**.
 
-For CI: run PyInstaller first, then use the Inno Setup command-line `ISCC.exe` to compile and attach the produced EXE to a GitHub Release.
+The base installer excludes optional ML and AI dependencies. Those remain available through the documented Python installation extras; no ML installer is attached to this release.
+
+## Scope and validation
+
+- Editing loads the complete dataset. Preview stays read-only and paged; preview Find and column profiles operate on the current page.
+- Display preferences do not change file contents. Copy uses raw values, independently of display formatting.
+- The release installer comes from successful [CI run 37474199204](https://github.com/SMcQueen2023/Parqcel/actions/runs/37474199204), built from commit `8e154a052d96ac721c3c9d6069e30e4a52ad6a1a`.
+- Validation covers Windows/Linux base and ML test profiles, code quality, installed-wheel checks, and standalone/installer smoke tests. The local full suite passed 314 tests.
