@@ -1,5 +1,6 @@
 import os
 import threading
+from types import SimpleNamespace
 
 import polars as pl
 import pytest
@@ -186,6 +187,8 @@ def test_progress_uses_gui_thread_and_cancelled_analysis_recovers_controls(
         assert not dialog.analyze()
         assert len(calls) == 1
         assert not dialog.analyze_button.isEnabled()
+        assert not dialog.memory_budget_combo.isEnabled()
+        assert not dialog.temporary_budget_combo.isEnabled()
         qtbot.mouseClick(dialog.cancel_button, Qt.MouseButton.LeftButton)
         assert cancel_events[0].is_set()
         assert not dialog.cancel_button.isEnabled()
@@ -194,6 +197,8 @@ def test_progress_uses_gui_thread_and_cancelled_analysis_recovers_controls(
         qtbot.waitUntil(lambda: not dialog.is_busy)
         assert dialog._report is None
         assert dialog.analyze_button.isEnabled()
+        assert dialog.memory_budget_combo.isEnabled()
+        assert dialog.temporary_budget_combo.isEnabled()
         assert dialog.progress.isHidden()
         assert dialog.cancel_button.isHidden()
         analyze_ready(dialog, qtbot)
@@ -222,6 +227,8 @@ def test_dataset_changes_invalidate_report_and_prevent_export(
     assert dialog._report is None
     assert not dialog.export_button.isEnabled()
     assert not dialog.analyze_button.isEnabled()
+    assert not dialog.memory_budget_combo.isEnabled()
+    assert not dialog.temporary_budget_combo.isEnabled()
     assert not dialog.export_selected(tmp_path / "stale.parquet")
     assert not (tmp_path / "stale.parquet").exists()
 
@@ -440,6 +447,174 @@ def test_export_cancellation_preserves_destination_and_stops_repeat_work(
         if operation == "cancel":
             assert dialog.export_button.isEnabled()
             assert dialog.cancel_button.isHidden()
+    finally:
+        release.set()
+        qtbot.waitUntil(lambda: not has_active_tasks(dialog))
+
+
+def test_automatic_budget_resolves_at_analysis_and_export_keeps_report_options(
+    make_dialog, qtbot, monkeypatch, report, tmp_path
+):
+    gib = 1024**3
+    available_choice = [2 * gib]
+    analyzed, exported, checked = [], [], []
+    monkeypatch.setattr(
+        optimizer_ui, "recommended_working_budget", lambda: available_choice[0]
+    )
+    monkeypatch.setattr(
+        optimizer_ui,
+        "analyze_parquet",
+        lambda frame, options, **kwargs: analyzed.append(options) or report,
+    )
+    original_write = optimizer_ui.write_parquet_verified_atomic
+    original_check = optimizer_ui.check_working_budget
+
+    def write(*args, **kwargs):
+        exported.append(kwargs)
+        return original_write(*args, **kwargs)
+
+    def check(frame, options, **kwargs):
+        checked.append(options)
+        return original_check(frame, options, **kwargs)
+
+    monkeypatch.setattr(optimizer_ui, "write_parquet_verified_atomic", write)
+    monkeypatch.setattr(optimizer_ui, "check_working_budget", check)
+    dialog, _, _ = make_dialog()
+    assert dialog.memory_budget_combo.currentData() == "auto"
+    assert dialog.temporary_budget_combo.currentData() == 4 * gib
+    assert dialog._options.max_working_bytes == 2 * gib
+    assert "Automatic: 2.00 GiB" in dialog.resource_estimate.text()
+    available_choice[0] = gib
+    analyze_ready(dialog, qtbot)
+    assert analyzed[0].max_working_bytes == gib
+    assert analyzed[0].max_temporary_bytes == 4 * gib
+    available_choice[0] = 3 * gib
+    assert dialog.export_selected(tmp_path / "budgeted.parquet")
+    qtbot.waitUntil(lambda: not dialog.is_busy)
+    assert checked[0].max_working_bytes == gib
+    assert exported[0]["max_temporary_bytes"] == 4 * gib
+    assert exported[0]["verification_batch_rows"] == analyzed[0].verification_batch_rows
+    assert (tmp_path / "budgeted.parquet").exists()
+
+
+def test_manual_resource_choices_persist_without_truncating_large_integer_values(
+    make_dialog, monkeypatch
+):
+    gib = 1024**3
+    monkeypatch.setattr(optimizer_ui, "recommended_working_budget", lambda: gib)
+    first, _, _ = make_dialog()
+    first.memory_budget_combo.setCurrentIndex(
+        first.memory_budget_combo.findData(8 * gib)
+    )
+    first.temporary_budget_combo.setCurrentIndex(
+        first.temporary_budget_combo.findData(64 * gib)
+    )
+    assert first._options.max_working_bytes == 8 * gib
+    assert first._options.max_temporary_bytes == 64 * gib
+    second, _, _ = make_dialog()
+    assert second.memory_budget_combo.currentData() == 8 * gib
+    assert second.temporary_budget_combo.currentData() == 64 * gib
+    assert second._options.max_working_bytes == 8 * gib
+    assert "Manual: 8.00 GiB" in second.resource_estimate.text()
+
+
+@pytest.mark.parametrize(
+    "invalid", ["not a budget", -1, 0, True, "999999999999999999999"]
+)
+def test_invalid_saved_resource_choices_fall_back_to_automatic_and_default_temp(
+    make_dialog, monkeypatch, invalid
+):
+    gib = 1024**3
+    store = optimizer_ui.settings()
+    store.setValue("optimizer/memory_budget", invalid)
+    store.setValue("optimizer/temporary_budget", invalid)
+    monkeypatch.setattr(optimizer_ui, "recommended_working_budget", lambda: gib)
+    dialog, _, _ = make_dialog()
+    assert dialog.memory_budget_combo.currentData() == "auto"
+    assert dialog.temporary_budget_combo.currentData() == 4 * gib
+    assert dialog._options.max_working_bytes == gib
+
+
+@pytest.mark.parametrize("control", ["memory_budget_combo", "temporary_budget_combo"])
+def test_changing_resource_limits_invalidates_measured_report(
+    make_dialog, qtbot, monkeypatch, report, control
+):
+    monkeypatch.setattr(optimizer_ui, "analyze_parquet", lambda *args, **kwargs: report)
+    dialog, _, _ = make_dialog()
+    analyze_ready(dialog, qtbot)
+    combo = getattr(dialog, control)
+    combo.setCurrentIndex(combo.count() - 1)
+    assert dialog._report is None
+    assert dialog.result_table.rowCount() == 0
+    assert not dialog.export_button.isEnabled()
+    assert dialog.result_summary.text() == dialog._INITIAL_SUMMARY
+    assert not dialog.is_busy
+
+
+def test_resource_estimates_are_explicit_and_do_not_claim_a_hard_ram_cap(
+    make_dialog, monkeypatch
+):
+    mib = 1024**2
+    monkeypatch.setattr(optimizer_ui, "recommended_working_budget", lambda: 512 * mib)
+    monkeypatch.setattr(
+        optimizer_ui,
+        "estimate_working_memory",
+        lambda *args, **kwargs: SimpleNamespace(
+            input_bytes=256 * mib,
+            sort_bytes=300 * mib,
+            write_bytes=800 * mib,
+            verification_bytes=128 * mib,
+            peak_bytes=1024 * mib,
+        ),
+    )
+    dialog, _, _ = make_dialog()
+    text = dialog.resource_estimate.text()
+    assert "Estimated peak for a full sort/export: 1.00 GiB" in text
+    assert "sort 300.00 MiB" in text
+    assert "write 800.00 MiB" in text
+    assert "verification 128.00 MiB" in text
+    assert "Already-loaded input: 256.00 MiB" in text
+    assert "undo history and other app memory are additional" in text
+    assert "not hard RAM caps" in text
+    assert "exceeds this budget" in text
+    assert dialog.resource_estimate.textFormat() == Qt.TextFormat.PlainText
+
+
+def test_resource_changes_are_ignored_during_an_active_operation(
+    make_dialog, qtbot, monkeypatch, report
+):
+    gib = 1024**3
+    started, release = threading.Event(), threading.Event()
+
+    def gated(*args, **kwargs):
+        started.set()
+        if not release.wait(5):
+            raise RuntimeError("Analysis was not released")
+        return report
+
+    monkeypatch.setattr(optimizer_ui, "analyze_parquet", gated)
+    dialog, _, _ = make_dialog()
+    dialog.memory_budget_combo.setCurrentIndex(
+        dialog.memory_budget_combo.findData(2 * gib)
+    )
+    try:
+        assert dialog.analyze()
+        qtbot.waitUntil(started.is_set)
+        dialog.memory_budget_combo.setCurrentIndex(
+            dialog.memory_budget_combo.findData(8 * gib)
+        )
+        dialog.temporary_budget_combo.setCurrentIndex(
+            dialog.temporary_budget_combo.findData(16 * gib)
+        )
+        assert dialog.memory_budget_combo.currentData() == 2 * gib
+        assert dialog.temporary_budget_combo.currentData() == 4 * gib
+        assert dialog._options.max_working_bytes == 2 * gib
+        assert dialog._options.max_temporary_bytes == 4 * gib
+        release.set()
+        qtbot.waitUntil(lambda: not dialog.is_busy)
+        dialog.prepare_close()
+        assert not dialog.memory_budget_combo.isEnabled()
+        assert not dialog.temporary_budget_combo.isEnabled()
     finally:
         release.set()
         qtbot.waitUntil(lambda: not has_active_tasks(dialog))

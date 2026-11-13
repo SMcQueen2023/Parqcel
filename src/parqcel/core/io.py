@@ -58,6 +58,7 @@ class ParquetWriteOptions:
 
 
 DEFAULT_PARQUET_OPTIONS = ParquetWriteOptions()
+DEFAULT_VERIFICATION_BATCH_ROWS = 65536
 _DISK_RESERVE_BYTES = 8 * 1024 * 1024
 
 
@@ -74,31 +75,71 @@ def _check_cancelled(cancel: Event | None) -> None:
         raise ParquetOperationCancelled("Parquet operation cancelled")
 
 
-def verify_parquet(
-    frame: pl.DataFrame, path: str | Path, *, cancel: Event | None = None
-) -> int:
-    """Fully reread and check names, order, dtypes and exact values; return bytes.
+def _validate_verification_batch_rows(verification_batch_rows: int) -> None:
+    if type(verification_batch_rows) is not int or verification_batch_rows <= 0:
+        raise ValueError("Verification batch rows must be a positive integer")
 
-    This intentionally allocates a second full frame. The caller must budget for
-    it. NaNs compare equal to NaNs; float values otherwise have no tolerance.
+
+def verify_parquet(
+    frame: pl.DataFrame,
+    path: str | Path,
+    *,
+    cancel: Event | None = None,
+    verification_batch_rows: int = DEFAULT_VERIFICATION_BATCH_ROWS,
+) -> int:
+    """Check every ordered value in bounded batches and return the file size.
+
+    Metadata supplies the schema and count; slice pushdown retains at most one
+    verification batch. Reader/row-group buffers can exceed that batch, so this
+    is not a process-memory cap. NaNs compare equal; floats have no tolerance.
     """
+    if not isinstance(frame, pl.DataFrame):
+        raise TypeError("A Polars DataFrame is required")
+    _validate_verification_batch_rows(verification_batch_rows)
     _check_cancelled(cancel)
-    restored = pl.read_parquet(path, glob=False)
+    scan = pl.scan_parquet(
+        path,
+        glob=False,
+        hive_partitioning=False,
+        cache=False,
+        low_memory=True,
+        parallel="none",
+    )
+    schema = scan.collect_schema()
     _check_cancelled(cancel)
-    if (
-        restored.columns != frame.columns
-        or restored.schema != frame.schema
-        or restored.shape != frame.shape
-    ):
+    if schema.names() != frame.columns or schema != frame.schema:
         raise ParquetVerificationError(
-            "Parquet verification failed: schema or shape changed"
+            "Parquet verification failed: ordered schema changed"
         )
-    # Polars 1.28 can report unequal empty categoricals with distinct caches;
-    # equal ordered schemas and shapes fully describe a zero-row dataset.
-    if frame.height and not restored.equals(frame, null_equal=True):
-        raise ParquetVerificationError(
-            "Parquet verification failed: ordered values changed"
-        )
+    count = int(scan.select(pl.len()).collect().item())
+    _check_cancelled(cancel)
+    if count != frame.height:
+        raise ParquetVerificationError("Parquet verification failed: row count changed")
+    # Identical schema/count fully describe an empty dataset. Polars 1.28 can
+    # report unequal empty categoricals solely because of string-cache identity.
+    for offset in range(0, frame.height, verification_batch_rows):
+        _check_cancelled(cancel)
+        length = min(verification_batch_rows, frame.height - offset)
+        restored = scan.slice(offset, length).collect()
+        _check_cancelled(cancel)
+        expected = frame.slice(offset, length)
+        if (
+            restored.columns != expected.columns
+            or restored.schema != expected.schema
+            or restored.shape != expected.shape
+        ):
+            raise ParquetVerificationError(
+                "Parquet verification failed: batch schema or shape changed"
+            )
+        if not restored.equals(expected, null_equal=True):
+            raise ParquetVerificationError(
+                f"Parquet verification failed: ordered values changed in rows "
+                f"{offset + 1:,} to {offset + length:,}"
+            )
+        # Release this batch before collecting the next one, rather than keeping
+        # it alive while Python evaluates the next collect() assignment.
+        del restored, expected
+        _check_cancelled(cancel)
     _check_cancelled(cancel)
     return Path(path).stat().st_size
 
@@ -238,6 +279,7 @@ def write_parquet_verified_atomic(
     cancel: Event | None = None,
     max_temporary_bytes: int | None = None,
     protected_paths: Iterable[str | Path] = (),
+    verification_batch_rows: int = DEFAULT_VERIFICATION_BATCH_ROWS,
 ) -> int:
     """Publish a verified copy, preserving any destination until final replace.
 
@@ -246,6 +288,7 @@ def write_parquet_verified_atomic(
     committed. GUI callers must coordinate changes to their protected source.
     """
     _validate_write_options(frame, options, max_temporary_bytes)
+    _validate_verification_batch_rows(verification_batch_rows)
     _check_cancelled(cancel)
     destination = Path(path).absolute()
     protected = tuple(Path(p) for p in protected_paths)
@@ -260,7 +303,12 @@ def write_parquet_verified_atomic(
                 frame, raw, destination.parent, options, cancel, max_temporary_bytes
             )
         _check_cancelled(cancel)
-        size = verify_parquet(frame, temporary, cancel=cancel)
+        size = verify_parquet(
+            frame,
+            temporary,
+            cancel=cancel,
+            verification_batch_rows=verification_batch_rows,
+        )
         if max_temporary_bytes is not None and size > max_temporary_bytes:
             raise ValueError("Parquet output exceeds the temporary file size limit")
         _check_destination(destination, protected)

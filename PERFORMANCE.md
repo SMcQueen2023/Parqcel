@@ -61,12 +61,39 @@ Further optimization should follow measured bottlenecks: bounded statistics cach
 
 The default search samples up to 20,000 rows uniformly over the full row range with a fixed seed, retaining their original relative order for the sample baseline. It profiles distinct counts, adjacent runs and string widths. Up to 12 orders include the unchanged order, single-column keys and pairs, giving early slots to both repeating values and high-cardinality numeric/time columns. A preferred column influences the candidates; it does not force the recommendation. Constant or unsupported sort keys are skipped. Nested columns remain attached to their whole rows.
 
-Every candidate uses the native Polars writer with Zstandard level 3, statistics enabled, 131,072-row groups and 1 MiB pages. Sample sizes narrow the search; they are not projected full-file sizes. The baseline and two best sample alternatives are then written on the full dataset and reread to verify ordered schema and exact values. Only those full measurements can become the recommendation or be exported. The original order wins ties. Comparisons use the original-order rewrite, not the existing source file's potentially different compression settings.
+Every candidate uses the native Polars writer with Zstandard level 3, statistics enabled, 131,072-row groups and 1 MiB pages. Sample sizes narrow the search; they are not projected full-file sizes. The baseline and two best sample alternatives are then written on the full dataset and verified. Only those full measurements can become the recommendation or be exported. The original order wins ties. Comparisons use the original-order rewrite, not the existing source file's potentially different compression settings.
 
-The additional working-memory estimate is limited to 512 MiB by default. It accounts for sampled/sorted frames, sorting indices, an encoded buffer and a verification reread; the input, undo history and other app allocations are additional. Native allocator and codec behavior prevent this from being a hard RSS cap. A temporary candidate is removed before writing the next. Preflight estimates and free-space checks reject unsuitable jobs, and a bounded writer limits each encoded temporary file to 1 GiB. Python callers can supply validated `OptimizationOptions` for other budgets; the desktop currently uses these defaults. Out-of-core sorting is not implemented.
+Verification checks metadata schema and row count, then compares every ordered value against the expected dataframe in lazy slices of up to **65,536 rows**. It preserves checks for dtypes, nested values, NaNs and temporal precision, without collecting a second complete dataframe. The previous verification batch is released before reading the next, and cancellation is checked between batches. Decoding a row group can still use more memory than the returned slice. This uses pinned **Polars 1.28.1** and does not provide out-of-core sorting.
+
+The desktop's **Automatic** working budget is one quarter of currently available physical RAM, capped at **4 GiB**, with a **512 MiB** fallback if availability cannot be measured. It is recalculated when analysis starts. Manual choices are **512 MiB, 1, 2, 4 and 8 GiB**. Automatic uses a system snapshot, not a memory reservation or container/process limit. Resource selections persist, and changing them invalidates the prior comparison.
+
+Estimates are calculated separately for sorting, writing and verification; the largest stage is compared with the additional working budget. They account for reordered data, sort indices, native encoding/materialization, callback buffers, verification batches and reader row groups. Average row width and native allocator behavior make these estimates approximate. The already-loaded input, undo history and other app allocations are additional; neither a budget nor the estimated peak is a hard RSS cap. Sample measurement has its own preflight, followed by full-data stage checks before measuring finalists.
+
+The desktop temporary-file limit defaults to **4 GiB**, with **1, 4, 16 and 64 GiB** choices. A bounded writer checks cancellation, free space and the byte limit before each encoded buffer reaches disk. One candidate file is retained at a time and removed before the next; existing source/destination files require additional space. This disk limit does not cap encoding memory. Python callers using `OptimizationOptions()` directly retain **512 MiB** working and **1 GiB** temporary defaults; they can configure those limits and `verification_batch_rows` explicitly.
 
 Export recomputes the selected stable ascending order with nulls last, writes a temporary sibling file, verifies every value and the ordered schema, syncs the file and atomically replaces the chosen destination. It refuses the active source, including resolved paths and existing file aliases. Verification or write failures leave existing destination bytes intact. Cancellation is cooperative between native operations and before publication; it cannot interrupt an active native sort/read/encoding call or undo a completed replacement. Closing waits for workers to drain.
 
 This is a bounded search, not proof of maximal compression. Sampling can miss an order that would compress better on the full dataset. Unsupported Parquet round trips fail explicitly, and custom source metadata is not preserved. Compression and read speed are different objectives: a frequent filter/time key may improve statistics-based skipping even when another key produces a smaller file. See [Apache Parquet encodings](https://parquet.apache.org/docs/file-format/data-pages/encodings/), [Polars Parquet writer options](https://docs.pola.rs/api/python/stable/reference/api/polars.DataFrame.write_parquet.html), and [Polars scan statistics](https://docs.pola.rs/api/python/stable/reference/api/polars.scan_parquet.html).
 
-Automatic codec/row-group searches and out-of-core optimization remain future work. For local comparisons, report dataset shape, Polars version, writer settings, sample/candidate limits, tested full byte counts, elapsed time and process peak memory; synthetic results are not a prediction for other files.
+Automatic codec/row-group searches and out-of-core optimization remain future work.
+
+### Optimizer benchmark
+
+```bash
+python scripts/benchmark_optimizer.py --rows 2000000 --working-mib 1024
+python scripts/benchmark_optimizer.py --input data.parquet
+```
+
+The script writes JSON with stage estimates, candidate sizes, analysis/export timings and cumulative native process peak RSS. It reads supplied files without modifying them; generated fixtures are created in a separate process, and candidate/export files are temporary. Without `--working-mib`, it uses Automatic. Its temporary-file limit is 4 GiB.
+
+One local Windows 11 run with Python 3.13.2 and Polars 1.28.1 used 2,000,000 rows, five columns and a 1 GiB additional working budget. The synthetic fixture contains shuffled IDs, correlated numeric/time values and repetitive strings:
+
+| Measurement | Result |
+| --- | ---: |
+| Estimated input dataframe size | 488,000,000 bytes (465.4 MiB) |
+| Estimated additional peak, writing stage | 1,012,175,872 bytes (965.3 MiB) |
+| Analysis / verified export time | 3.39 s / 1.21 s |
+| Original-order / smallest tested file | 38,510,448 / 13,622,333 bytes |
+| Cumulative process peak RSS, including input | 1,269,096,448 bytes (1.18 GiB) |
+
+This is one synthetic run, not a prediction for other datasets or a before/after memory comparison. Fixture generation is excluded from the measured process; loading, analysis and export share its cumulative peak. Report hardware, cache conditions, versions, dataset shape, writer settings and limits, and repeat measurements on representative files before drawing conclusions.

@@ -27,6 +27,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.background_tasks import TaskHandle, run_in_background
+from app.preferences import settings
 from parqcel.core.io import (
     ParquetOperationCancelled,
     write_parquet_verified_atomic,
@@ -37,9 +38,18 @@ from parqcel.core.parquet_optimizer import (
     OptimizationReport,
     analyze_parquet,
     check_working_budget,
+    estimate_working_memory,
     sortable_columns,
     sorted_frame,
 )
+from parqcel.core.resource_limits import recommended_working_budget
+
+_MIB = 1024**2
+_GIB = 1024**3
+_MEMORY_CHOICES = (512 * _MIB, _GIB, 2 * _GIB, 4 * _GIB, 8 * _GIB)
+_TEMPORARY_CHOICES = (_GIB, 4 * _GIB, 16 * _GIB, 64 * _GIB)
+_MEMORY_SETTING = "optimizer/memory_budget"
+_TEMPORARY_SETTING = "optimizer/temporary_budget"
 
 
 class _ProgressBridge(QObject):
@@ -95,7 +105,8 @@ class ParquetOptimizerDialog(QDialog):
         self.setWindowTitle("Optimize Parquet export")
         self.setWindowModality(Qt.WindowModality.WindowModal)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        self.resize(920, 590)
+        self.resize(980, 640)
+        self._settings = settings()
         self._model = model
         self._current_model = (
             current_model if current_model is not None else lambda: model
@@ -152,8 +163,53 @@ class ParquetOptimizerDialog(QDialog):
         self.settings_label.setObjectName("secondaryText")
         self.settings_label.setTextFormat(Qt.TextFormat.PlainText)
         self.settings_label.setWordWrap(True)
-        self._update_settings_label()
         layout.addWidget(self.settings_label)
+
+        resource_controls = QHBoxLayout()
+        memory_label = QLabel("Working memory budget")
+        self.memory_budget_combo = QComboBox()
+        self.memory_budget_combo.addItem("Automatic", "auto")
+        for size in _MEMORY_CHOICES:
+            self.memory_budget_combo.addItem(_size_text(size), size)
+        self.memory_budget_combo.setToolTip(
+            "Automatic uses one quarter of currently available RAM, capped at 4 GiB "
+            "(512 MiB if availability cannot be measured), rechecked when analysis starts. "
+            "This is an additional-working-memory estimate, not a hard process-memory cap."
+        )
+        memory_label.setBuddy(self.memory_budget_combo)
+        resource_controls.addWidget(memory_label)
+        resource_controls.addWidget(self.memory_budget_combo, 1)
+        temporary_label = QLabel("Temporary file limit")
+        self.temporary_budget_combo = QComboBox()
+        for size in _TEMPORARY_CHOICES:
+            self.temporary_budget_combo.addItem(_size_text(size), size)
+        self.temporary_budget_combo.setToolTip(
+            "Maximum encoded size of each temporary candidate or export file. "
+            "Existing input and destination files require additional disk space."
+        )
+        temporary_label.setBuddy(self.temporary_budget_combo)
+        resource_controls.addWidget(temporary_label)
+        resource_controls.addWidget(self.temporary_budget_combo, 1)
+        self._memory_choice = self._read_budget_choice(
+            _MEMORY_SETTING, _MEMORY_CHOICES, "auto"
+        )
+        self._temporary_choice = self._read_budget_choice(
+            _TEMPORARY_SETTING, _TEMPORARY_CHOICES, 4 * _GIB
+        )
+        self.memory_budget_combo.setCurrentIndex(
+            self.memory_budget_combo.findData(self._memory_choice)
+        )
+        self.temporary_budget_combo.setCurrentIndex(
+            self.temporary_budget_combo.findData(self._temporary_choice)
+        )
+        self.memory_budget_combo.currentIndexChanged.connect(self._budgets_changed)
+        self.temporary_budget_combo.currentIndexChanged.connect(self._budgets_changed)
+        layout.addLayout(resource_controls)
+        self.resource_estimate = QLabel()
+        self.resource_estimate.setObjectName("secondaryText")
+        self.resource_estimate.setTextFormat(Qt.TextFormat.PlainText)
+        self.resource_estimate.setWordWrap(True)
+        layout.addWidget(self.resource_estimate)
 
         controls = QHBoxLayout()
         controls.addWidget(QLabel("Preferred sort column"))
@@ -234,6 +290,8 @@ class ParquetOptimizerDialog(QDialog):
         self._validity_timer.setInterval(150)
         self._validity_timer.timeout.connect(self.validate_snapshot)
         self._validity_timer.start()
+        self._options = self._selected_options()
+        self._update_settings_label()
         self._update_controls()
 
     @property
@@ -296,6 +354,8 @@ class ParquetOptimizerDialog(QDialog):
     def _update_controls(self) -> None:
         ready = self._snapshot_valid and not self._closing and not self.is_busy
         self.preferred_column.setEnabled(ready)
+        self.memory_budget_combo.setEnabled(ready)
+        self.temporary_budget_combo.setEnabled(ready)
         self.analyze_button.setEnabled(ready)
         self.export_button.setEnabled(ready and self._selected_candidate() is not None)
         self.result_table.setEnabled(ready and self._report is not None)
@@ -305,13 +365,57 @@ class ParquetOptimizerDialog(QDialog):
         )
 
     def _clear_report(self, *args) -> None:
-        if self.is_busy:
+        if self.is_busy or self._closing or not self._snapshot_valid:
             return
         self._report = None
         self.result_table.setRowCount(0)
         self.result_summary.setText(self._INITIAL_SUMMARY)
         self.status.setText("Choose Analyze to compare export sizes.")
         self._update_controls()
+
+    def _read_budget_choice(
+        self, key: str, allowed: tuple[int, ...], default: str | int
+    ) -> str | int:
+        value = self._settings.value(key, default)
+        if value == "auto" and default == "auto":
+            return "auto"
+        try:
+            number = int(str(value))
+        except (ValueError, TypeError):
+            return default
+        return number if number in allowed else default
+
+    def _selected_options(self) -> OptimizationOptions:
+        memory = (
+            recommended_working_budget()
+            if self._memory_choice == "auto"
+            else int(self._memory_choice)
+        )
+        return OptimizationOptions(
+            preferred_column=self.preferred_column.currentData(),
+            max_working_bytes=memory,
+            max_temporary_bytes=int(self._temporary_choice),
+        )
+
+    def _budgets_changed(self, *args) -> None:
+        if self.is_busy or self._closing or not self._snapshot_valid:
+            # Disabled controls cannot be changed by the user. Restore the
+            # accepted values if a programmatic change occurs during a task.
+            for combo, choice in (
+                (self.memory_budget_combo, self._memory_choice),
+                (self.temporary_budget_combo, self._temporary_choice),
+            ):
+                blocked = combo.blockSignals(True)
+                combo.setCurrentIndex(combo.findData(choice))
+                combo.blockSignals(blocked)
+            return
+        self._memory_choice = self.memory_budget_combo.currentData()
+        self._temporary_choice = self.temporary_budget_combo.currentData()
+        self._settings.setValue(_MEMORY_SETTING, self._memory_choice)
+        self._settings.setValue(_TEMPORARY_SETTING, self._temporary_choice)
+        self._options = self._selected_options()
+        self._clear_report()
+        self._update_settings_label()
 
     def _update_settings_label(self) -> None:
         options = self._options
@@ -325,6 +429,21 @@ class ParquetOptimizerDialog(QDialog):
             f"Limits: {options.sample_rows:,} sample rows · {options.max_candidates} candidates · "
             f"{options.finalists} finalists · {_size_text(options.max_working_bytes)} estimated working memory · "
             f"{_size_text(options.max_temporary_bytes)} temporary files."
+        )
+        estimate = estimate_working_memory(self._frame, options, sorting=True)
+        selected = "Automatic" if self._memory_choice == "auto" else "Manual"
+        shortfall = (
+            " The full sort/export estimate exceeds this budget; choose a larger budget or a smaller dataset."
+            if estimate.peak_bytes > options.max_working_bytes
+            else ""
+        )
+        self.resource_estimate.setText(
+            f"{selected}: {_size_text(options.max_working_bytes)} additional working budget. "
+            f"Estimated peak for a full sort/export: {_size_text(estimate.peak_bytes)} "
+            f"(sort {_size_text(estimate.sort_bytes)}, write {_size_text(estimate.write_bytes)}, "
+            f"verification {_size_text(estimate.verification_bytes)}).\n"
+            f"Already-loaded input: {_size_text(estimate.input_bytes)}; undo history and other app memory are additional. "
+            "Estimates are not hard RAM caps; native allocations can vary." + shortfall
         )
 
     def _start_operation(self, name: str) -> int:
@@ -350,9 +469,9 @@ class ParquetOptimizerDialog(QDialog):
         if self.is_busy or not self.validate_snapshot():
             return False
         self._clear_report()
-        self._options = OptimizationOptions(
-            preferred_column=self.preferred_column.currentData()
-        )
+        # Resolve Automatic against currently available RAM for this analysis;
+        # keep those options with its report so export uses the same limits.
+        self._options = self._selected_options()
         self._update_settings_label()
         generation = self._start_operation("analysis")
         self.status.setText("Preparing size comparisons…")
@@ -521,6 +640,7 @@ class ParquetOptimizerDialog(QDialog):
                 options=options,
                 cancel=cancel,
                 max_temporary_bytes=optimizer_options.max_temporary_bytes,
+                verification_batch_rows=optimizer_options.verification_batch_rows,
                 protected_paths=protected,
             )
 

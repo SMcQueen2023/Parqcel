@@ -12,6 +12,7 @@ from parqcel.core.parquet_optimizer import (
     OptimizationOptions,
     analyze_parquet,
     check_working_budget,
+    estimate_working_memory,
     sortable_columns,
     sorted_frame,
 )
@@ -51,6 +52,7 @@ def test_actual_full_encodings_determine_verified_winner_with_identical_options(
         return original_write(self, file, **kwargs)
 
     def verify(expected, path, **kwargs):
+        assert kwargs["verification_batch_rows"] == options.verification_batch_rows
         full_verified.append(expected.clone())
         return original_verify(expected, path, **kwargs)
 
@@ -373,3 +375,101 @@ def test_custom_write_options_are_retained_in_report():
     )
     assert report.write_options == write_options
     assert report.best.keys == ()
+
+
+def test_stage_estimates_are_metadata_only_and_do_not_sum_sequential_phases():
+    class FrameMetadata:
+        height = 2_000_000
+        width = 20
+
+        def estimated_size(self):
+            return 490_415_818
+
+    options = OptimizationOptions()
+    estimate = estimate_working_memory(FrameMetadata(), options)
+    assert estimate.input_bytes == 490_415_818
+    assert estimate.peak_bytes == max(
+        estimate.sort_bytes, estimate.write_bytes, estimate.verification_bytes
+    )
+    assert estimate.peak_bytes < (
+        estimate.sort_bytes + estimate.write_bytes + estimate.verification_bytes
+    )
+    # The previous sorted estimator rejected this metadata even at 1 GiB.
+    # Batch verification and row-group writer allowances now fit that budget.
+    assert estimate.peak_bytes < 1024**3
+    check_working_budget(FrameMetadata(), replace(options, max_working_bytes=1024**3))
+    with pytest.raises(MemoryError, match="writing.*configured.*512 MiB"):
+        check_working_budget(FrameMetadata(), options)
+    baseline = estimate_working_memory(FrameMetadata(), options, sorting=False)
+    assert baseline.sort_bytes == 0
+    assert baseline.write_bytes < estimate.write_bytes
+    assert baseline.verification_bytes < estimate.verification_bytes
+    retained = estimate_working_memory(FrameMetadata(), options, retained_bytes=12345)
+    assert retained.input_bytes == estimate.input_bytes
+    assert retained.peak_bytes == estimate.peak_bytes + 12345
+    with pytest.raises(FrozenInstanceError):
+        estimate.peak_bytes = 1
+
+
+def test_verification_estimate_tracks_batch_and_row_group_size():
+    class FrameMetadata:
+        height = 2_000_000
+        width = 20
+
+        def estimated_size(self):
+            return 490_415_818
+
+    frame = FrameMetadata()
+    options = OptimizationOptions()
+    regular = estimate_working_memory(frame, options)
+    smaller_batch = estimate_working_memory(
+        frame, replace(options, verification_batch_rows=1024)
+    )
+    assert smaller_batch.verification_bytes < regular.verification_bytes
+    assert smaller_batch.write_bytes == regular.write_bytes
+    smaller_groups = estimate_working_memory(
+        frame,
+        replace(
+            options, write_options=replace(options.write_options, row_group_size=8192)
+        ),
+    )
+    assert smaller_groups.write_bytes < regular.write_bytes
+    assert smaller_groups.verification_bytes < regular.verification_bytes
+
+
+def test_samples_run_before_full_budget_failure_without_returning_unverified_report(
+    monkeypatch,
+):
+    frame = pl.DataFrame({"id": range(6000), "text": ["x" * 80] * 6000})
+    options = OptimizationOptions(sample_rows=20, max_working_bytes=5 * 1024**2)
+    measured = []
+    original = optimizer._measure
+
+    def measure(data, path, limits, cancel, *, verify):
+        measured.append((data.height, verify))
+        return original(data, path, limits, cancel, verify=verify)
+
+    monkeypatch.setattr(optimizer, "_measure", measure)
+    with pytest.raises(MemoryError, match="configured"):
+        analyze_parquet(frame, options)
+    assert measured
+    assert all(height == 20 and not verified for height, verified in measured)
+
+
+def test_custom_verification_batch_is_forwarded_through_all_full_measurements(
+    monkeypatch,
+):
+    seen = []
+    original = optimizer.verify_parquet
+
+    def verify(frame, path, **kwargs):
+        seen.append(kwargs["verification_batch_rows"])
+        return original(frame, path, **kwargs)
+
+    monkeypatch.setattr(optimizer, "verify_parquet", verify)
+    analyze_parquet(
+        pl.DataFrame({"id": [3, 1, 2]}), OptimizationOptions(verification_batch_rows=1)
+    )
+    assert seen and set(seen) == {1}
+    with pytest.raises(ValueError, match="verification_batch_rows"):
+        OptimizationOptions(verification_batch_rows=0)

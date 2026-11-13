@@ -43,7 +43,28 @@ def main():
         window.model.undo()
         if window.model.get_dataframe()["value"].to_list() != [1, 2]:
             raise RuntimeError("Desktop smoke test failed")
-        QTimer.singleShot(0, window.close)
+
+        def check_packaged_controls():
+            try:
+                if not window.grid.add_row_action.isEnabled():
+                    raise RuntimeError("Packaged Add row action is unavailable")
+                if not window.grid.row_header.show_boundary(1):
+                    raise RuntimeError("Packaged row insertion control is hidden")
+                window.model.insert_rows(1)
+                if window.model.get_dataframe()["value"].to_list() != [1, None, 2]:
+                    raise RuntimeError("Packaged row insertion failed")
+                window.model.undo()
+                optimizer = window.open_parquet_optimizer()
+                if optimizer is None or not optimizer.memory_budget_combo.isEnabled():
+                    raise RuntimeError("Packaged optimizer controls are unavailable")
+                optimizer.close()
+            except Exception:
+                logger.exception("Desktop control smoke test failed")
+                app.exit(1)
+                return
+            window.close()
+
+        QTimer.singleShot(0, check_packaged_controls)
 
     # Start the Qt event loop
     return app.exec()

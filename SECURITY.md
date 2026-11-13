@@ -58,7 +58,9 @@ Background results apply only if the originating dataset and revision are still 
 
 Parquet exports write a sibling temporary file and replace the destination after output completes. This avoids directly truncating a destination during normal write failure. It is not a backup, access-control mechanism or guarantee against every filesystem/power-loss scenario.
 
-Optimized exports additionally reread and verify all ordered values, column names and dtypes before replacement. They reject the active source path and existing aliases, leaving the editing session unchanged. Cancellation is checked between native operations and before publication; it cannot undo a replacement already in progress. The app retains task tracking after closing the optimizer and defers opening/saving a dataset until that export finishes. Candidate counts, memory estimates and temporary-file limits are documented in [PERFORMANCE.md](PERFORMANCE.md); they are not an operating-system memory sandbox. Custom source Parquet metadata is not preserved.
+Optimized exports additionally verify metadata schema/count and all ordered values in bounded batches before replacement. The default is 65,536 rows per batch; exact dtype/value comparisons still cover the entire output. They reject the active source path and existing aliases, leaving the editing session unchanged. Cancellation is checked between native operations, verification batches and before publication; it cannot undo a replacement already in progress. The app retains task tracking after closing the optimizer and defers opening/saving a dataset until that export finishes. Custom source Parquet metadata is not preserved.
+
+Optimizer memory budgets are stage estimates for additional work, excluding the loaded input, undo history and other application memory. Automatic uses a snapshot of available physical RAM; it does not reserve memory or enforce a process/container limit. Native decoding, sorting and encoding can exceed estimates. The separate temporary-file limit is enforced before writing each encoded buffer to disk, but does not limit that buffer's allocation. Desktop and Python defaults differ; see [PERFORMANCE.md](PERFORMANCE.md). None of these checks is an operating-system memory sandbox or an out-of-core execution guarantee.
 
 Dirty-state prompts help prevent accidental loss when opening another dataset or closing the editor. Save completion marks a session clean only when it acknowledges the same revision that was written.
 
@@ -81,4 +83,4 @@ Use the repository's [GitHub Security Advisories](https://github.com/SMcQueen202
 
 If a credential is exposed, revoke it through the provider, replace it and review recent usage.
 
-Last updated: 2026-10-06.
+Last updated: 2026-11-12.

@@ -20,6 +20,7 @@ from polars.datatypes import DataTypeClass
 
 from .io import (
     DEFAULT_PARQUET_OPTIONS,
+    DEFAULT_VERIFICATION_BATCH_ROWS,
     ParquetOperationCancelled,
     ParquetWriteOptions,
     verify_parquet,
@@ -37,6 +38,7 @@ class OptimizationOptions:
     seed: int = 1729
     preferred_column: str | None = None
     write_options: ParquetWriteOptions = DEFAULT_PARQUET_OPTIONS
+    verification_batch_rows: int = DEFAULT_VERIFICATION_BATCH_ROWS
 
     def __post_init__(self) -> None:
         for name in (
@@ -45,6 +47,7 @@ class OptimizationOptions:
             "finalists",
             "max_working_bytes",
             "max_temporary_bytes",
+            "verification_batch_rows",
         ):
             value = getattr(self, name)
             if type(value) is not int or value <= 0:
@@ -77,6 +80,22 @@ class OptimizationReport:
     row_count: int
     sample_rows: int
     write_options: ParquetWriteOptions
+
+
+@dataclass(frozen=True)
+class WorkingMemoryEstimate:
+    """Per-stage additional working estimates; stages are not added together.
+
+    ``input_bytes`` describes the caller's already-loaded dataframe. It is
+    excluded from ``peak_bytes``; history and unrelated app allocations are also
+    separate. Native reader/codec allocation and skewed row widths can vary.
+    """
+
+    input_bytes: int
+    sort_bytes: int
+    write_bytes: int
+    verification_bytes: int
+    peak_bytes: int
 
 
 @dataclass(frozen=True)
@@ -132,6 +151,56 @@ def _contains_object(dtype: pl.DataType | DataTypeClass) -> bool:
     return False
 
 
+def estimate_working_memory(
+    frame: pl.DataFrame,
+    options: OptimizationOptions = OptimizationOptions(),
+    *,
+    sorting: bool = True,
+    retained_bytes: int = 0,
+) -> WorkingMemoryEstimate:
+    """Estimate native stages from metadata only, without sampling or collecting.
+
+    Sorting retains a reordered dataframe and permutation/scratch indices.
+    Writing reserves a dataframe-sized native encoding/materialization allowance
+    plus one row-group-sized callback buffer. Pinned Polars 1.28.1 delivers
+    multiple buffers per file, so a second full encoded copy is not assumed.
+    Verification retains only a batch, with two row-group allowances for reader
+    decoding; its expected slice shares the prepared frame's buffers.
+
+    Row-group/batch widths use average bytes per row, not a hard bound. Very
+    uneven values, native compression and parallel allocation may differ.
+    """
+    if type(retained_bytes) is not int or retained_bytes < 0:
+        raise ValueError("Retained working bytes must be non-negative")
+    input_bytes = int(frame.estimated_size())
+    allowance = max(4 * 1024 * 1024, frame.width * 4096)
+
+    def row_bytes(count: int) -> int:
+        if not frame.height:
+            return 0
+        return (
+            input_bytes * min(frame.height, count) + frame.height - 1
+        ) // frame.height
+
+    group_bytes = row_bytes(options.write_options.row_group_size)
+    batch_bytes = row_bytes(options.verification_batch_rows)
+    sorted_copy = input_bytes if sorting else 0
+    sort_bytes = (
+        retained_bytes + sorted_copy + frame.height * 16 + allowance if sorting else 0
+    )
+    write_bytes = retained_bytes + sorted_copy + input_bytes + group_bytes + allowance
+    verification_bytes = (
+        retained_bytes + sorted_copy + batch_bytes + 2 * group_bytes + allowance
+    )
+    return WorkingMemoryEstimate(
+        input_bytes,
+        sort_bytes,
+        write_bytes,
+        verification_bytes,
+        max(sort_bytes, write_bytes, verification_bytes),
+    )
+
+
 def check_working_budget(
     frame: pl.DataFrame,
     options: OptimizationOptions,
@@ -139,22 +208,43 @@ def check_working_budget(
     sorting: bool = True,
     retained_bytes: int = 0,
 ) -> None:
-    """Check estimated additional sort/write/verify memory before allocating it."""
-    # Additional memory beyond the caller's input: sort copy/indices, encoded
-    # output buffers or verification reread, and a codec/metadata allowance.
-    # Include a sampled input retained by the analyzer separately. Native
-    # allocator and row-group internals make this a best-effort estimate.
-    if type(retained_bytes) is not int or retained_bytes < 0:
-        raise ValueError("Retained working bytes must be non-negative")
-    estimate = frame.estimated_size() * (3 if sorting else 2) + retained_bytes
-    if sorting:
-        estimate += frame.height * 16
-    estimate += max(4 * 1024 * 1024, frame.width * 4096)
+    """Reject a predicted peak above the configured additional working budget."""
+    estimates = estimate_working_memory(
+        frame, options, sorting=sorting, retained_bytes=retained_bytes
+    )
+    stage, estimate = max(
+        (
+            ("sorting", estimates.sort_bytes),
+            ("writing", estimates.write_bytes),
+            ("verification", estimates.verification_bytes),
+        ),
+        key=lambda item: item[1],
+    )
     if estimate > options.max_working_bytes:
         raise MemoryError(
-            f"Estimated additional working memory is {estimate:,} bytes, above the "
-            f"{options.max_working_bytes:,}-byte budget. Increase the working budget "
-            "or optimize a smaller dataset."
+            f"Estimated additional working memory for {stage} is {estimate:,} bytes "
+            f"({estimate / 1024**2:,.1f} MiB), above the configured "
+            f"{options.max_working_bytes:,}-byte budget "
+            f"({options.max_working_bytes / 1024**2:,.0f} MiB). "
+            "Choose a higher optimizer working-memory budget if available, or "
+            "optimize a smaller dataset. Loaded input and undo history are additional."
+        )
+
+
+def _check_sampling_budget(frame: pl.DataFrame, options: OptimizationOptions) -> None:
+    """Check expected sample and Python/native index allocation before gathering."""
+    count = min(frame.height, options.sample_rows)
+    if count == frame.height:
+        return  # The sample is a shallow clone, not an allocation of row values.
+    estimated_rows = (
+        int(frame.estimated_size()) * count + frame.height - 1
+    ) // frame.height
+    estimate = estimated_rows + count * 48 + max(4 * 1024 * 1024, frame.width * 4096)
+    if estimate > options.max_working_bytes:
+        raise MemoryError(
+            f"Estimated additional working memory for sampling is {estimate:,} bytes, "
+            f"above the configured {options.max_working_bytes:,}-byte budget. "
+            "Choose a higher optimizer working-memory budget or fewer sample rows."
         )
 
 
@@ -283,7 +373,12 @@ def _measure(
                 "Increase the temporary budget or optimize a smaller dataset."
             )
         if verify:
-            verified_size = verify_parquet(frame, path, cancel=cancel)
+            verified_size = verify_parquet(
+                frame,
+                path,
+                cancel=cancel,
+                verification_batch_rows=options.verification_batch_rows,
+            )
             if verified_size != size:
                 raise OSError("The measured Parquet file changed during verification")
         _check_cancel(cancel)
@@ -328,7 +423,7 @@ def analyze_parquet(
         _check_cancel(cancel)
 
     update("Preparing a deterministic representative sample")
-    check_working_budget(frame, options, sorting=False)
+    _check_sampling_budget(frame, options)
     sample = _sample(frame, options)
     retained_sample_bytes = (
         int(sample.estimated_size()) if sample.height < frame.height else 0
@@ -338,8 +433,6 @@ def analyze_parquet(
     )
     update(f"Profiling {sample.height:,} sampled rows")
     keys = _candidate_keys(sample, options, cancel)
-    if len(keys) > 1:
-        check_working_budget(frame, options, sorting=True)
     results: list[CandidateResult] = []
     sample_count = sample.height
     with tempfile.TemporaryDirectory(prefix="parqcel-optimize-") as directory:

@@ -1,5 +1,6 @@
 """Run with isolated Python after installing the wheel, outside the checkout."""
 
+import importlib.metadata
 import importlib.resources
 import os
 import subprocess
@@ -16,6 +17,7 @@ from app.main_window import MainWindow  # noqa: E402
 from app.theme import apply_theme  # noqa: E402
 from app.background_tasks import has_active_tasks  # noqa: E402
 from models.polars_table_model import PolarsTableModel  # noqa: E402
+from parqcel import __version__  # noqa: E402
 from parqcel.core.io import read_dataset, write_dataset_atomic  # noqa: E402
 
 
@@ -29,6 +31,7 @@ def _wait_for(app, predicate, *, timeout=10):
 
 
 def _run_smoke():
+    assert importlib.metadata.version("parqcel") == __version__
     app = QApplication([])
     apply_theme(app, "dark")
     window = MainWindow()
@@ -57,6 +60,8 @@ def _run_smoke():
         write_dataset_atomic(window.model.get_dataframe(), path)
         assert read_dataset(path).height == 2
         optimizer = window.open_parquet_optimizer()
+        assert optimizer.memory_budget_combo.currentData() == "auto"
+        assert optimizer.temporary_budget_combo.currentData() == 4 * 1024**3
         assert optimizer.analyze()
         _wait_for(app, lambda: not has_active_tasks(window))
         assert optimizer.export_button.isEnabled()

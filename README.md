@@ -41,17 +41,19 @@ Parqcel includes optional Phase 1 deployment scaffolding for Google Cloud Platfo
 - **Paste as new rows** (**Ctrl+Shift+V**) reads tab-separated clipboard cells in visible column order, starting with the first visible column. It inserts new rows without overwriting existing cells. The first clipboard row is treated as data, not guessed to be a header. Omitted columns become null; blank fields stay empty in string columns and become null in other supported columns. Invalid typed values reject the entire paste. Each insertion is one undo step, subject to the history budget. Clipboard input is limited to 10 MiB and inserted rows to 100,000 total dataset cells, including omitted columns. The existing typed editor rejects pasted temporal values beyond six fractional-second digits; existing nanosecond values remain intact. Normal **Ctrl+V** within a cell editor still pastes text into that cell.
 - The start screen and File menu list recent files. Dropping a Parquet file opens read-only preview; dropping a CSV file starts the editor's import workflow.
 
-**Help → About Parqcel** reports the application version. Package and installer version declarations are currently **0.2.0**. Row insertion and Parquet export optimization are unreleased checkout changes; the previous 0.2.0 installer does not include them. See [CHANGELOG.md](CHANGELOG.md) and the [Windows release checklist](installer/windows_release_checklist.md) when preparing a new version.
+**Help → About Parqcel** reports the application version. **0.3.0** adds row insertion, Parquet export optimization and its resource controls to the 0.2.0 spreadsheet workspace. See [CHANGELOG.md](CHANGELOG.md) for the changes and the [Windows release checklist](installer/windows_release_checklist.md) for packaging and validation.
 
 ### Optimize Parquet export
 
-Open a dataset for editing, then choose **Analysis → Optimize Parquet export...**. Optionally choose a preferred sort column, such as a date or a column you frequently filter on, and click **Analyze**. The comparison measures actual file sizes for a bounded set of sort orders, then fully measures and verifies the original order and the two best sample candidates. The smallest tested full output is selected; the original order wins ties.
+Open a dataset for editing, then choose **Analysis → Optimize Parquet export...**. Optionally choose a preferred sort column, such as a date or a column you frequently filter on, and click **Analyze**. The comparison measures actual file sizes for a bounded set of sort orders, then fully measures and verifies the original order and up to two best sample candidates. The smallest tested full output is selected; the original order wins ties.
 
-Select a fully measured result and choose **Export selected…** to create a new Parquet copy. The export sorts whole rows stably and verifies column order, dtypes and every value before publishing the file. It leaves the editor, source file, undo history and saved/unsaved state unchanged. The active source cannot be used as the export destination.
+Select a fully measured result and choose **Export selected…** to create a new Parquet copy. The export sorts whole rows stably and verifies column order, dtypes and every value in batches of up to 65,536 rows before publishing the file. It leaves the editor, source file, undo history and saved/unsaved state unchanged. The active source cannot be used as the export destination.
 
 Savings compare against an original-order rewrite with identical settings: Zstandard level 3, statistics enabled, 131,072-row groups and 1 MiB pages. They do not compare against the existing source file, whose encoding may differ. This search finds the smallest tested candidate, not a guaranteed global optimum. Smaller files do not necessarily make every query faster.
 
-Analysis uses up to 20,000 sampled rows and 12 candidate orders, with a 512 MiB estimate for additional working memory and a 1 GiB temporary-file limit. The dataset must already fit in the editor; larger optimization jobs can be rejected by the resource checks. Memory checks are estimates, not a cap on native allocations. Cancel stops between native operations; closing the app waits for work to finish. Output preserves supported dataset values and schema, but does not retain custom source-file metadata. See [PERFORMANCE.md](PERFORMANCE.md) for details.
+Analysis uses up to 20,000 sampled rows and 12 candidate orders. **Working memory budget** defaults to **Automatic**: one quarter of currently available RAM, capped at 4 GiB, or 512 MiB when availability cannot be measured. It is refreshed when analysis starts. Manual choices are 512 MiB, 1, 2, 4 and 8 GiB. **Temporary file limit** defaults to 4 GiB, with 1, 4, 16 and 64 GiB choices. Both selections are remembered; changing them clears previous results.
+
+The dialog shows separate sort, write and verification estimates. These cover additional working memory; the loaded dataset, undo history and other application memory are extra. They are not hard limits on native allocations. The dataset must already fit in the editor, and sorting remains in memory with pinned Polars 1.28.1. Cancel stops between native operations and verification batches; closing the app waits for work to finish. Output preserves supported values and schema, but not custom source-file metadata. See [PERFORMANCE.md](PERFORMANCE.md) for limits and a reproducible optimizer benchmark.
 
 The title marks unsaved changes. Opening another file or closing the window offers Save, Discard and Cancel. Undoing back to the saved state clears the unsaved marker.
 
@@ -63,7 +65,11 @@ Parquet is the primary supported format. Excel remains a legacy optional import 
 
 ### Windows desktop
 
-Use the standalone Windows installer provided with a release. It includes Python and creates normal application shortcuts. The **base** build contains the editor and preview; the **ml** build also includes feature engineering and dimensionality reduction. Hosted/local AI stacks are excluded from both desktop build profiles.
+Download **Parqcel-Installer.exe** from the [v0.3.0 release](https://github.com/SMcQueen2023/Parqcel/releases/tag/v0.3.0). This **base** installer includes Python, the editor, preview, row insertion and Parquet export optimization. It creates normal application shortcuts and excludes optional ML and AI packages.
+
+To upgrade, close Parqcel, run the new installer and choose the same application folder as your existing installation. Reopen the app and check **Help → About Parqcel** reports **0.3.0**. Updating source files or installing a Python package does not update an existing standalone installation.
+
+The separately buildable **ml** profile adds feature engineering and dimensionality reduction. Hosted/local AI stacks are excluded from both desktop build profiles; use the Python extras below for those features.
 
 ### Python and source
 

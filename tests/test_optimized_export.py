@@ -3,6 +3,7 @@ from decimal import Decimal
 import os
 from threading import Event
 from types import SimpleNamespace
+import weakref
 
 import polars as pl
 import pytest
@@ -39,12 +40,17 @@ def _rich_frame():
 
 
 @pytest.mark.parametrize("empty", [False, True])
-def test_verified_export_preserves_full_schema_values_and_column_order(tmp_path, empty):
+@pytest.mark.parametrize("batch_rows", [1, 2, 65536])
+def test_verified_export_preserves_full_schema_values_and_column_order(
+    tmp_path, empty, batch_rows
+):
     frame = _rich_frame()
     if empty:
         frame = frame.head(0)
     path = tmp_path / "data[verified].parquet"
-    size = io.write_parquet_verified_atomic(frame, path, max_temporary_bytes=1024**2)
+    size = io.write_parquet_verified_atomic(
+        frame, path, max_temporary_bytes=1024**2, verification_batch_rows=batch_rows
+    )
     restored = pl.read_parquet(path, glob=False)
     assert restored.columns == frame.columns
     assert restored.schema == frame.schema
@@ -132,7 +138,7 @@ def test_supported_alternative_codecs_roundtrip(tmp_path, codec):
 
 
 @pytest.mark.parametrize(
-    "change", ["order", "columns", "dtype", "float", "nested", "category"]
+    "change", ["order", "columns", "dtype", "float", "nested", "category", "row_count"]
 )
 def test_verification_rejects_changed_data_and_preserves_destination(
     tmp_path, monkeypatch, change
@@ -151,8 +157,14 @@ def test_verification_rejects_changed_data_and_preserves_destination(
             pl.Series("list", [[2, None], None, []], dtype=pl.List(pl.Int64))
         ),
         "category": frame.with_columns(pl.col("category").cast(pl.String)),
+        "row_count": frame.head(2),
     }[change]
-    monkeypatch.setattr(pl, "read_parquet", lambda *a, **k: changed)
+    original_write = pl.DataFrame.write_parquet
+
+    def write_changed(self, *args, **kwargs):
+        return original_write(changed, *args, **kwargs)
+
+    monkeypatch.setattr(pl.DataFrame, "write_parquet", write_changed)
     with pytest.raises(io.ParquetVerificationError):
         io.write_parquet_verified_atomic(frame, path)
     assert path.read_bytes() == b"existing file"
@@ -182,14 +194,15 @@ def test_cancellation_at_each_export_phase_preserves_destination_and_cleans_temp
 
         monkeypatch.setattr(pl.DataFrame, "write_parquet", write)
     elif stage == "after_read":
-        original_read = pl.read_parquet
+        original_collect = pl.LazyFrame.collect
 
-        def read(*args, **kwargs):
-            result = original_read(*args, **kwargs)
-            cancel.set()
+        def collect(self, *args, **kwargs):
+            result = original_collect(self, *args, **kwargs)
+            if result.columns == frame.columns:
+                cancel.set()
             return result
 
-        monkeypatch.setattr(pl, "read_parquet", read)
+        monkeypatch.setattr(pl.LazyFrame, "collect", collect)
     else:
         original_check = io._check_destination
         checks = 0
@@ -293,3 +306,117 @@ def test_source_alias_created_during_export_is_rechecked_before_publish(
         "export.parquet",
         "source.parquet",
     ]
+
+
+def test_verification_reads_bounded_batches_without_retaining_previous_or_eager_read(
+    tmp_path, monkeypatch
+):
+    batch_rows = io.DEFAULT_VERIFICATION_BATCH_ROWS
+    frame = pl.DataFrame({"id": range(2 * batch_rows + 17), "value": 1.25})
+    path = tmp_path / "wide[batch].parquet"
+    frame.write_parquet(path, row_group_size=batch_rows)
+    original_collect = pl.LazyFrame.collect
+    previous = None
+    batch_sizes = []
+
+    def collect(self, *args, **kwargs):
+        nonlocal previous
+        assert previous is None or previous() is None, "Prior batch still retained"
+        result = original_collect(self, *args, **kwargs)
+        if result.columns == frame.columns:
+            batch_sizes.append(result.height)
+            previous = weakref.ref(result)
+        return result
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Verification must not use the eager full-file reader")
+
+    monkeypatch.setattr(pl, "read_parquet", forbidden)
+    monkeypatch.setattr(pl.LazyFrame, "collect", collect)
+    assert io.verify_parquet(frame, path) == path.stat().st_size
+    assert batch_sizes == [batch_rows, batch_rows, 17]
+    assert previous() is None
+
+
+@pytest.mark.parametrize("changed_row", [0, 3, 4, 7, 8, 10])
+def test_verification_detects_exact_changes_at_and_around_batch_boundaries(
+    tmp_path, changed_row
+):
+    frame = pl.DataFrame(
+        {
+            "id": range(11),
+            "time": pl.Series(range(11), dtype=pl.Datetime("ns")),
+            "value": [1.0] * 11,
+        }
+    )
+    # An alteration well below approximate floating-point comparison tolerances
+    # must still be rejected, including the final partial batch.
+    altered = frame.with_columns(
+        pl.when(pl.col("id") == changed_row)
+        .then(1.0 + 1e-14)
+        .otherwise(pl.col("value"))
+        .alias("value")
+    )
+    path = tmp_path / "altered.parquet"
+    altered.write_parquet(path, row_group_size=3)
+    with pytest.raises(io.ParquetVerificationError, match="ordered values"):
+        io.verify_parquet(frame, path, verification_batch_rows=4)
+
+
+def test_verification_rejects_row_reordering_across_batch_boundary(tmp_path):
+    frame = pl.DataFrame({"id": range(9), "nested": [[i, None] for i in range(9)]})
+    path = tmp_path / "swapped.parquet"
+    frame[[0, 1, 2, 4, 3, 5, 6, 7, 8]].write_parquet(path, row_group_size=3)
+    with pytest.raises(io.ParquetVerificationError, match="ordered values"):
+        io.verify_parquet(frame, path, verification_batch_rows=4)
+
+
+def test_batch_cancellation_preserves_existing_destination_and_stops_later_reads(
+    tmp_path, monkeypatch
+):
+    frame = pl.DataFrame({"id": range(11)})
+    path = tmp_path / "existing.parquet"
+    path.write_bytes(b"original")
+    cancel = Event()
+    original_collect = pl.LazyFrame.collect
+    read_batches = []
+
+    def collect(self, *args, **kwargs):
+        result = original_collect(self, *args, **kwargs)
+        if result.columns == frame.columns:
+            read_batches.append(result["id"].to_list())
+            if len(read_batches) == 2:
+                cancel.set()
+        return result
+
+    monkeypatch.setattr(pl.LazyFrame, "collect", collect)
+    with pytest.raises(io.ParquetOperationCancelled):
+        io.write_parquet_verified_atomic(
+            frame, path, cancel=cancel, verification_batch_rows=4
+        )
+    assert read_batches == [[0, 1, 2, 3], [4, 5, 6, 7]]
+    assert path.read_bytes() == b"original"
+    assert list(tmp_path.iterdir()) == [path]
+
+
+@pytest.mark.parametrize("batch_rows", [0, -1, True, 1.5, "4"])
+def test_invalid_verification_batch_size_fails_before_scan_or_write(
+    tmp_path, monkeypatch, batch_rows
+):
+    frame = pl.DataFrame({"id": [1]})
+    path = tmp_path / "existing.parquet"
+    path.write_bytes(b"original")
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Invalid verification settings must fail before I/O")
+
+    monkeypatch.setattr(pl.DataFrame, "write_parquet", forbidden)
+    monkeypatch.setattr(pl, "scan_parquet", forbidden)
+    with pytest.raises(ValueError, match="Verification batch rows"):
+        io.verify_parquet(frame, path, verification_batch_rows=batch_rows)
+    with pytest.raises(ValueError, match="Verification batch rows"):
+        io.write_parquet_verified_atomic(
+            frame, path, verification_batch_rows=batch_rows
+        )
+    assert path.read_bytes() == b"original"
+    assert list(tmp_path.iterdir()) == [path]

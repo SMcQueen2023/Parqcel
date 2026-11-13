@@ -7,12 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-12
+
 ### Added
 
 - Row-boundary insertion controls and an Add row menu in the editor, with blank-row insertion and clipboard paste as new rows.
 - Atomic typed TSV row insertion with one-step undo/redo, pagination updates, explicit clipboard limits and stale-result protection.
 - Parquet export optimizer with sampled sort-order comparisons, verified full-size finalists, a preferred sort column and original-order fallback.
 - Separate optimized-copy export with exact schema/value verification, source-file protection, resource checks and cooperative cancellation.
+- Remembered optimizer memory and temporary-file controls, Automatic memory sizing from available RAM, and visible sort/write/verification estimates.
+- A reproducible optimizer benchmark reporting actual output sizes, timing and native process peak memory.
+
+### Changed
+
+- Verify complete Parquet outputs in bounded 65,536-row batches rather than retaining a second full dataframe, with cancellation between batches.
+- Estimate optimizer memory by execution stage and check sample and full-data work separately; keep pinned Polars 1.28.1 and in-memory sorting.
+- Use Automatic working memory and a 4 GiB temporary-file limit in the desktop; direct Python options retain their 512 MiB/1 GiB defaults.
+- Align application, package and installer version declarations at 0.3.0, with consistency checks and standalone smoke coverage for row insertion and optimizer controls.
 
 ### Fixed
 

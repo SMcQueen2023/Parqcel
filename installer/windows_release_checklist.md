@@ -2,6 +2,8 @@
 
 Use this checklist when producing the mainstream Windows release artifact for Parqcel.
 
+The current release version is **0.3.0**. Match `release_notes.md`, version declarations and the installer to the same tested commit before publishing its assets.
+
 ## Goal
 
 Ship `Parqcel-Installer.exe` as the primary download for mainstream Windows users.
@@ -76,8 +78,8 @@ powershell -ExecutionPolicy Bypass -File scripts/build_windows_desktop.ps1 `
 9. Verify Save, Save As and CSV export still work, including saved/unsaved state and reopening the output.
 10. In Light and Dark themes, hover over row-number borders before, between and after rows. Check the boxed plus is centered at common display scales, then insert a blank row at each boundary. Verify pagination, Undo and Redo.
 11. Paste multiple typed rows with **Ctrl+Shift+V**, including reordered/hidden columns. Check insertion position, one-step Undo and rejection of invalid values without partial changes. Read-only preview must not offer insertion.
-12. Choose **Analysis → Optimize Parquet export...**, optionally select a preferred column and analyze a sample file. Check original-order and candidate sizes, full-measurement-only export, and original-order fallback when sorting does not improve size.
-13. Export an optimized copy and reopen it. Check row count, column order/dtypes and values; sorting may change exported row order. Confirm the source bytes, editor order, unsaved state and Undo history remain unchanged, and that choosing the active source as destination is rejected.
+12. Choose **Analysis → Optimize Parquet export...**. Check Automatic working memory, manual 512 MiB/1/2/4/8 GiB choices, and the default 4 GiB temporary-file limit with 1/4/16/64 GiB choices. Reopen the dialog to verify saved choices; confirm budget changes clear stale results. Analyze a sample file and check stage estimates, original-order/candidate sizes, full-measurement-only export, and original-order fallback when sorting does not improve size.
+13. Export an optimized copy with more than 65,536 rows and reopen it. Check row count, column order/dtypes and values across verification batches; sorting may change exported row order. Confirm the source bytes, editor order, unsaved state and Undo history remain unchanged, and that choosing the active source as destination is rejected. A budget rejection must leave existing output untouched and identify the limiting stage or file limit.
 14. Cancel analysis/export and close the optimizer during work. Verify controls recover, ordinary failed/cancelled exports preserve existing destinations, and opening/saving waits for an export still finishing after dialog close. A replacement already in progress may complete. Closing the app must wait for active work.
 15. Confirm Parqcel appears in Installed Apps and uninstalls cleanly.
 
@@ -87,14 +89,14 @@ powershell -ExecutionPolicy Bypass -File scripts/build_windows_desktop.ps1 `
 - Call out that the installer does not require Python on the target machine
 - Mention any intentionally excluded advanced features
 - Explain that optimized export searches tested sort orders, preserves the editor, and uses additional memory and temporary disk space; link the [usage and limits](../README.md#optimize-parquet-export)
-- Match notes to the exact tested commit and installer; do not reuse the historical v0.2.0 notes or installer for unreleased features
+- Match notes to the exact tested commit and installer; do not reuse an older artifact for a newer version's features
 - Attach `Parqcel-Installer.exe` to the release as the main Windows asset
 
 ## Draft a GitHub Release from CI
 
 1. Find a successful **CI** run for the version being released. Confirm the `desktop-package` job passed the standalone and installer smoke tests.
 2. Download its `parqcel-windows-base` artifact and extract `Parqcel-Installer.exe` from the ZIP. CI artifacts are temporary build downloads; uploading one does not create a GitHub Release.
-3. Confirm `pyproject.toml`, `src/parqcel/__init__.py`, the installer definition and the app's About dialog report the intended new version. Version changes must be included in the tested build commit. Move the appropriate Unreleased changelog entries into that release and rewrite `installer/release_notes.md` for its features, profile, validation and artifact provenance; that file currently describes the previous v0.2.0 build.
+3. Confirm `pyproject.toml`, `src/parqcel/__init__.py`, the installer definition and the app's About dialog report the intended version. Version changes must be included in the tested build commit. Move the appropriate Unreleased changelog entries into the dated release, and check `installer/release_notes.md` against its features, profile and validation. Record the actual build commit, successful checks and artifact provenance before publication; remove any preparation placeholders.
 4. In **Releases → Draft a new release**, choose an unused version tag, target the tested commit, add the title and matching release notes, and attach the extracted installer. Do not move an existing release tag to new code.
 5. Choose **Save draft** to review it without publication. When ready, open the draft, choose **Set as latest release**, and click **Publish release**. A draft does not replace the current public latest release.
 
@@ -113,7 +115,7 @@ gh release create $releaseTag "$artifactDirectory/Parqcel-Installer.exe" `
 
 For GitHub's current UI instructions, see [Managing releases](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository).
 
-Pushing to `main` triggers CI; it does not publish a GitHub Release or update an installed desktop copy. Publish the matching installer as a release asset separately. Users upgrade by closing Parqcel and running the new installer against their existing application folder, then checking **Help → About Parqcel**.
+Pushing to `main` triggers CI; it does not publish a GitHub Release or update an installed desktop copy. Publish the matching installer as a release asset separately. To upgrade to 0.3.0, users close Parqcel, run the new installer against their existing application folder, then confirm **Help → About Parqcel** reports **0.3.0**.
 
 ## Recommendation
 
